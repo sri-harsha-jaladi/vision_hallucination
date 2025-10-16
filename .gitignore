@@ -1,0 +1,6 @@
+benchmarks/
+llava_model_weights/
+LLaVA_old/
+train_datasets/
+nltk_data/
+testing_res/

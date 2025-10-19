@@ -4,3 +4,4 @@ LLaVA_old/
 train_datasets/
 nltk_data/
 testing_res/
+trained_mm_projections/

@@ -64,24 +64,35 @@ def generate_llava(batch, tokenizer, model, processor, max_length=128, do_sample
         input_ids = batch["input_ids"]
         image_tensor = batch["image_tensors"]
         input_ids = input_ids.cuda()
+        attention_mask = (input_ids != tokenizer.pad_token_id).int()
 
-        output_ids = model.generate(
-            input_ids,
+        # output_ids = model.generate(
+        #     input_ids,
+        #     attention_mask = attention_mask,
+        #     images=image_tensor.half().cuda(),
+        #     do_sample=True if args.temperature > 0 else False,
+        #     temperature=args.temperature,
+        #     top_p=args.top_p,
+        #     num_beams=args.num_beams,
+        #     max_new_tokens=args.max_new_tokens,
+        #     use_cache=True,
+        #     stopping_criteria=stopping_criteria,
+        #     # num_return_sequences=num_return_sequences,
+        # )
+        # generated_outputs = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+        # generated_outputs = [out.strip() for out in generated_outputs]
+        # generated_outputs = [out[: -len(stop_str)] if out.endswith(stop_str) else out for out in generated_outputs]
+
+        output_ids = model.forward(
+            input_ids=input_ids,
+            attention_mask = attention_mask,
             images=image_tensor.half().cuda(),
-            do_sample=True if args.temperature > 0 else False,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            num_beams=args.num_beams,
-            max_new_tokens=args.max_new_tokens,
-            use_cache=True,
-            stopping_criteria=stopping_criteria,
-            # num_return_sequences=num_return_sequences,
-        )
-        generated_outputs = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-        generated_outputs = [out.strip() for out in generated_outputs]
-        generated_outputs = [out[: -len(stop_str)] if out.endswith(stop_str) else out for out in generated_outputs]
+            use_cache=False,
+            output_attentions=False,
+            output_hidden_states=True,
+            return_dict=False)
 
-        return generated_outputs
+        return output_ids
 
 
 def batch_eval_model(args):
@@ -105,9 +116,9 @@ def batch_eval_model(args):
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
 
-    dataset_name="amber"
+    dataset_name="pope"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=32, batch_size=32)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=16, batch_size=16)
 
     all_generated_captions = []
     question_ids = []

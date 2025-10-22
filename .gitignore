@@ -5,4 +5,5 @@ train_datasets/
 nltk_data/
 testing_res/
 trained_mm_projections/
-halu_detection_mitigation/
+visual_genome/
+haloc/

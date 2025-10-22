@@ -8,8 +8,8 @@ from google.oauth2.service_account import Credentials
 # ================== CONFIG ==================
 SERVICE_ACCOUNT_FILE = "/Data2/Arun-UAV/NLP/self-halu-detection/vertix_ai.json"
 BUCKET_NAME = "train_data_vision"
-FOLDER_PATH = "/Data2/Arun-UAV/NLP/vision_halu/train_datasets/poc_5000_coco_images"
-PREFIX = "coco_batch_1_15000/"   # Optional subfolder in bucket
+FOLDER_PATH = "/Data2/Arun-UAV/NLP/vision_halu/visual_genome/target_images"
+PREFIX = "visual_genome_25k/"   # Optional subfolder in bucket
 MAX_WORKERS = 64                    # Tune to number of CPU cores
 # ============================================
 
@@ -57,6 +57,8 @@ def upload_images_to_gcs_parallel(folder_path: str) -> pd.DataFrame:
 # ---------- MAIN ----------
 if __name__ == "__main__":
     df = upload_images_to_gcs_parallel(FOLDER_PATH)
-    output_csv = "/Data2/Arun-UAV/NLP/vision_halu/train_datasets/coco_batch_1_15000_gcp_upload_urs.csv"
+    output_csv = "/Data2/Arun-UAV/NLP/vision_halu/haloc/visual_genome_25K_gcp_upload_urs.csv"
     df.to_csv(output_csv, index=False)
     print(f"✅ Upload complete — results saved to {output_csv}")
+    
+    

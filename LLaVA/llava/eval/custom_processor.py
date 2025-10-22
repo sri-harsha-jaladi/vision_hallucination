@@ -71,7 +71,7 @@ class LlaVaProcessor:
 
     #     return image_tensor, input_ids
 
-    def format_text(self, text: str):
+    def format_text(self, text: str, answer:str=None):
         if self.model_config.mm_use_im_start_end:
             text = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + "\n" + text
         else:
@@ -81,6 +81,7 @@ class LlaVaProcessor:
         conv.append_message(conv.roles[0], text)
         conv.append_message(conv.roles[1], None)
         text = conv.get_prompt()
+        text += answer if answer is not None else ""
 
         return text
 
@@ -104,8 +105,8 @@ class LlaVaProcessor:
 
         return image_tensor, input_ids
 
-    def get_processed_tokens_batch(self, batch_text: List[str], images: Union[List[str], List[Image.Image]]):
-        prompt = [self.format_text(text) for text in batch_text]
+    def get_processed_tokens_batch(self, batch_text: List[str], images: Union[List[str], List[Image.Image]], batch_answers: List[str]):
+        prompt = [self.format_text(text, answer) for text, answer in zip(batch_text, batch_answers)]
         # check if image_paths is a list of images or a list of image paths
         if type(images[0]) is str:
             images = [self.load_image(image_path) for image_path in images]
@@ -136,6 +137,7 @@ def collate_fn_builder(processor=None, tokenizer=None):
         batch_images, batch_text = processor.get_processed_tokens_batch(
             [example["question"] for example in batch],
             [example["image_path"] for example in batch],
+            [example["answer"] for example in batch]
         )
 
         processed_batch["image_tensors"] = batch_images

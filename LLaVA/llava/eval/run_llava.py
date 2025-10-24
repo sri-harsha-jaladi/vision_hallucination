@@ -21,7 +21,7 @@ from llava.conversation import SeparatorStyle, conv_templates
 from llava.mm_utils import KeywordsStoppingCriteria
 
 from PIL import Image
-
+from uuid import uuid4
 import requests
 from PIL import Image
 from io import BytesIO
@@ -64,7 +64,27 @@ def generate_llava(batch, tokenizer, model, processor, max_length=128, do_sample
         input_ids = batch["input_ids"]
         image_tensor = batch["image_tensors"]
         input_ids = input_ids.cuda()
+        token_level_labels = batch["token_level_labels"].cuda()
+        ans_masks = batch["answer_masks"].cuda()
+        
         attention_mask = (input_ids != tokenizer.pad_token_id).int()
+        
+        hidden_layers = {}
+        def save_hook(layer_id):
+            def fn(module, input, output):
+                # Detach and move to CPU to avoid GPU memory blowup
+                hidden_layers[layer_id] = output[0].detach().cpu()
+            return fn
+        
+        layers_to_hook = [24, 30]
+        
+        handles = []
+        for i, layer in enumerate(model.model.layers):
+            if i in layers_to_hook:
+                handle = layer.register_forward_hook(save_hook(i))
+                handles.append(handle)
+        
+        
 
         # output_ids = model.generate(
         #     input_ids,
@@ -82,17 +102,45 @@ def generate_llava(batch, tokenizer, model, processor, max_length=128, do_sample
         # generated_outputs = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
         # generated_outputs = [out.strip() for out in generated_outputs]
         # generated_outputs = [out[: -len(stop_str)] if out.endswith(stop_str) else out for out in generated_outputs]
+        
+        with torch.inference_mode():
+            output_ids = model.forward(
+                input_ids=input_ids,
+                attention_mask = attention_mask,
+                images=image_tensor.half().cuda(),
+                use_cache=False)
+        
+        for h in handles:
+            h.remove()
+            
 
-        output_ids = model.forward(
-            input_ids=input_ids,
-            attention_mask = attention_mask,
-            images=image_tensor.half().cuda(),
-            use_cache=False,
-            output_attentions=False,
-            output_hidden_states=True,
-            return_dict=False)
+        expanded_input_ids = []
+        expanded_token_level_labels = []
+        expanded_ans_masks = []
+        for input_id, token_level_labels, ans_mask in zip(input_ids, token_level_labels, ans_masks):
+            
+            img_token_position = torch.where(input_id==-200)[0].tolist()[0]
+            expanded_input_ids.append(torch.cat((input_id[:img_token_position], torch.full((575,), -200, device=input_id.device), input_id[img_token_position:])))
+            expanded_token_level_labels.append(torch.cat((token_level_labels[:img_token_position], torch.full((575,), 0, device=token_level_labels.device), token_level_labels[img_token_position:])))
+            expanded_ans_masks.append(torch.cat((ans_mask[:img_token_position], torch.full((575,), 0, device=ans_mask.device), ans_mask[img_token_position:])))
+        
+        expanded_input_ids = torch.stack(expanded_input_ids).cpu()
+        expanded_token_level_labels = torch.stack(expanded_token_level_labels).cpu()
+        expanded_ans_masks = torch.stack(expanded_ans_masks).cpu()
 
-        return output_ids
+        target_hl_30_embds = [h[m.bool()] for h, m in zip(hidden_layers[30], expanded_ans_masks)]
+        target_hl_24_embds = [h[m.bool()] for h, m in zip(hidden_layers[24], expanded_ans_masks)]
+        target_labels = [h[m.bool()] for h, m in zip(expanded_token_level_labels, expanded_ans_masks)]
+        df_24 = pd.DataFrame({"embds": [j for i in target_hl_24_embds for j in i.tolist()], "labels": [j for i in target_labels for j in i.tolist()]})
+        df_30 = pd.DataFrame({"embds": [j for i in target_hl_30_embds for j in i.tolist()], "labels": [j for i in target_labels for j in i.tolist()]})
+        
+        b_id = str(uuid4())
+        df_24.to_json("/Data2/Arun-UAV/NLP/vision_halu/haloc/embeddings/caption/llava_24/batch_" + str(b_id) + ".jsonl", lines=True, orient="records")
+        df_30.to_json("/Data2/Arun-UAV/NLP/vision_halu/haloc/embeddings/caption/llava_30/batch_" + str(b_id) + ".jsonl", lines=True, orient="records")
+
+        del input_ids, output_ids, attention_mask, image_tensor, ans_masks, expanded_input_ids, expanded_token_level_labels, expanded_ans_masks, target_hl_30_embds, target_hl_24_embds, target_labels, df_24, df_30
+        torch.cuda.empty_cache()
+        
 
 
 def batch_eval_model(args):
@@ -116,34 +164,17 @@ def batch_eval_model(args):
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
 
-    dataset_name="pope"
+    dataset_name="holoc_caption"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=16, batch_size=16)
-
-    all_generated_captions = []
-    question_ids = []
-    questions = []
-    answers = []
-    all_dfs = []
-    for batch in tqdm(dataloader, desc="Generating captions"):
-        generated_captions = generate_llava(batch, tokenizer, model, processor)
-        df = pd.DataFrame({k:v for k,v in batch.items() if k not in ['image_tensors', 'input_ids', 'image']})
-        df["generated_captions"] = generated_captions
-        all_dfs.append(df)
-        # all_generated_captions.extend(generated_captions)
-        # question_ids.extend(batch["question_id"])
-        # questions.extend(batch["answer"])
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=32, batch_size=32)
     
-    result_df = pd.concat(all_dfs)
-    if dataset_name == "chair":
-        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/chair_llava_plus_des_embed_20_des.jsonl", lines=True, orient="records")
-    elif dataset_name == "pope":
-        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/pope_llava_plus_des_embed_20_des.jsonl", lines=True, orient="records")
-    elif dataset_name == "amber":
-        req_df = result_df[["question_id", "generated_captions"]]
-        req_df.columns = ["id", "response"]
-        req_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_gen_llava_res.json", lines=True, orient="records")
-        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_gen_llava_all_res.json", lines=True, orient="records")
+    for batch in tqdm(dataloader, desc="storing embds"):
+        generate_llava(batch, tokenizer, model, processor)
+
+    # if your batch dict retains GPU tensors, also: del batch
+
+    # 5) return unused cached blocks to the driver (optional but helpful)
+    torch.cuda.empty_cache()
 
 
 def eval_model(args):

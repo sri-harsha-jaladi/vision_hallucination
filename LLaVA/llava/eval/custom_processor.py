@@ -328,7 +328,7 @@ def _initialize_dataloader(dataset_name: str, collate_fn, num_workers, batch_siz
         return DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=False,
+            shuffle=True,
             num_workers=num_workers,
             collate_fn=collate_fn,
             pin_memory=True,
@@ -386,7 +386,17 @@ def get_dataset(dataset_name: str):
         return df.to_dict("records")
     
     
-    elif dataset_name == "holoc_caption":
+    elif dataset_name == "holoc_total_train_gemini_labels":
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/caption/gemini_labeled_28k.csv")
+        df_1 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/instruct/gemini_labeled_40k.csv")
+        df_2 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tp_data.csv")
+        df_3 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tn_data.csv")
+        total_df = pd.concat([df, df_1, df_2, df_3])
+        total_df = total_df.sample(frac=1)
+        return total_df.to_dict("records")
+
+    elif dataset_name == "holoc_caption_test":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/holoc/test_caption_3200.csv")
         return df.to_dict("records")
+    
     

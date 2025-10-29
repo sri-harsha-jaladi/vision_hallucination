@@ -8,3 +8,5 @@ trained_mm_projections/
 visual_genome/
 haloc/
 head_checkpoints/
+evidence_head_train_datasets/
+large_image_datasets/

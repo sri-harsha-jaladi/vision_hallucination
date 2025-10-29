@@ -321,14 +321,14 @@ def collate_fn_builder(processor=None, tokenizer=None):
     return collate_fn
 
 
-def _initialize_dataloader(dataset_name: str, collate_fn, num_workers, batch_size):
+def _initialize_dataloader(dataset_name: str, collate_fn, num_workers, batch_size, shuffle = False):
 
         dataset = VQADataset(dataset_name=dataset_name)
 
         return DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=True,
+            shuffle=shuffle,
             num_workers=num_workers,
             collate_fn=collate_fn,
             pin_memory=True,
@@ -399,4 +399,18 @@ def get_dataset(dataset_name: str):
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/holoc/test_caption_3200.csv")
         return df.to_dict("records")
     
+    elif dataset_name == "holoc_instruct_test":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/holoc/test_instruct_3200.csv")
+        return df.to_dict("records")
     
+    elif dataset_name == "holoc_vqa_test":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/holoc/test_vqa_3200.csv")
+        return df.to_dict("records")
+    
+    elif dataset_name == "holoc_vqa_test_tn":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/holoc/test_vqa_tn_3200.csv")
+        return df.to_dict("records")
+    
+    elif dataset_name == "chair_caption_gen":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/chair_caption_gen.csv")
+        return df.to_dict("records")

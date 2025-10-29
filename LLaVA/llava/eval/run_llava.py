@@ -211,13 +211,13 @@ def train_batch_model(args):
 
     dataset_name="holoc_total_train_gemini_labels"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64*2, batch_size=64*2)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64*2, batch_size=64*2, shuffle=True)
     
     detection_head_30 = HaluDetectionHead30().cuda()
     detection_head_24 = HaluDetectionHead24().cuda()
     
     # num_gpus = torch.cuda.device_count()
-    # if num_gpus > 1:
+    # if num_gpus >         1:
     #     detection_head_30 = nn.DataParallel(detection_head_30)
     #     detection_head_24 = nn.DataParallel(detection_head_24)
     
@@ -295,13 +295,13 @@ def eval_batch_model(args):
     model.config.tokenizer_padding_side = tokenizer.padding_side = "left"
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
 
-    detection_head_30_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/caption_train_head_24l_25_20_2024_d_8192.bin", map_location='cuda')
+    detection_head_30_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_head_24l_26_20_2024_d_8192.bin", map_location='cuda')
     detection_head_30 = HaluDetectionHead24().cuda()
     detection_head_30.load_state_dict(detection_head_30_weights)
 
-    dataset_name="holoc_caption_test"
+    dataset_name="chair_caption_gen"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=16, batch_size=16, shuffle=False)
     
     detection_head_30.eval()
     all_dfs = []
@@ -310,7 +310,7 @@ def eval_batch_model(args):
         hl_30_embds, hl_24_embds, target_labels, response_ids = generate_llava(batch, tokenizer, model, processor, mode="eval")
         
         all_res = []
-        for hl_30_embd, target_label, response_id in zip(hl_30_embds, target_labels, response_ids):
+        for hl_30_embd, target_label, response_id in zip(hl_24_embds, target_labels, response_ids):
 
             labels_mapped = torch.where(target_label == -1, 0, torch.where(target_label == 0, 1, 2))
             logits_30 = detection_head_30(hl_30_embd)
@@ -324,11 +324,7 @@ def eval_batch_model(args):
         all_dfs.append(df)
 
     total_df = pd.concat(all_dfs)
-    total_df.to_csv("/Data2/Arun-UAV/NLP/vision_halu/testing_res/halu_detection/caption_test_res_24l_25_20_2024_d_8192.csv", index=False) 
-
-
-    
-
+    total_df.to_csv("/Data2/Arun-UAV/NLP/vision_halu/testing_res/halu_detection/chair_res_24l_26_20_2024_d_8192.csv", index=False) 
 
 
 
@@ -346,5 +342,5 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=25)
     args = parser.parse_args()
 
-    # eval_batch_model(args)
-    train_batch_model(args)
+    eval_batch_model(args)
+    # train_batch_model(args)

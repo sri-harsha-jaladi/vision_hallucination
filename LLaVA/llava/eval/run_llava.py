@@ -71,6 +71,7 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
         input_ids = input_ids.cuda()
         token_level_labels = batch["token_level_labels"].cuda()
         ans_masks = batch["answer_masks"].cuda()
+        token_2_bb_masks = batch["token_2_bb_masks"].cuda()
         
         attention_mask = (input_ids != tokenizer.pad_token_id).int()
         
@@ -89,25 +90,6 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
                 handle = layer.register_forward_hook(save_hook(i))
                 handles.append(handle)
         
-        
-
-        # output_ids = model.generate(
-        #     input_ids,
-        #     attention_mask = attention_mask,
-        #     images=image_tensor.half().cuda(),
-        #     do_sample=True if args.temperature > 0 else False,
-        #     temperature=args.temperature,
-        #     top_p=args.top_p,
-        #     num_beams=args.num_beams,
-        #     max_new_tokens=args.max_new_tokens,
-        #     use_cache=True,
-        #     stopping_criteria=stopping_criteria,
-        #     # num_return_sequences=num_return_sequences,
-        # )
-        # generated_outputs = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-        # generated_outputs = [out.strip() for out in generated_outputs]
-        # generated_outputs = [out[: -len(stop_str)] if out.endswith(stop_str) else out for out in generated_outputs]
-        
         with torch.inference_mode():
             output_ids = model.forward(
                 input_ids=input_ids,
@@ -122,31 +104,41 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
         expanded_input_ids = []
         expanded_token_level_labels = []
         expanded_ans_masks = []
-        for input_id, token_level_labels, ans_mask in zip(input_ids, token_level_labels, ans_masks):
+        expanded_token_2_bb_masks = []
+        img_token_position = []
+        for input_id, token_level_labels, ans_mask, token_2_bb_mask in zip(input_ids, token_level_labels, ans_masks, token_2_bb_masks):
             
             img_token_position = torch.where(input_id==-200)[0].tolist()[0]
             expanded_input_ids.append(torch.cat((input_id[:img_token_position], torch.full((575,), -200, device=input_id.device), input_id[img_token_position:])))
             expanded_token_level_labels.append(torch.cat((token_level_labels[:img_token_position], torch.full((575,), 0, device=token_level_labels.device), token_level_labels[img_token_position:])))
             expanded_ans_masks.append(torch.cat((ans_mask[:img_token_position], torch.full((575,), 0, device=ans_mask.device), ans_mask[img_token_position:])))
+            expanded_token_2_bb_masks.append(torch.cat((token_2_bb_mask[:img_token_position], torch.full((575, 576), 0, device=token_2_bb_mask.device), token_2_bb_mask[img_token_position:])))
         
         expanded_input_ids = torch.stack(expanded_input_ids).cpu()
         expanded_token_level_labels = torch.stack(expanded_token_level_labels).cpu()
         expanded_ans_masks = torch.stack(expanded_ans_masks).cpu()
+        expanded_token_2_bb_masks = torch.stack(expanded_token_2_bb_masks).cpu()
 
-        target_hl_30_embds = [h[m.bool()] for h, m in zip(hidden_layers[30], expanded_ans_masks)]
-        target_hl_24_embds = [h[m.bool()] for h, m in zip(hidden_layers[24], expanded_ans_masks)]
-        target_labels = [h[m.bool()] for h, m in zip(expanded_token_level_labels, expanded_ans_masks)]
-        response_ids = [h[m.bool()] for h, m in zip(expanded_input_ids, expanded_ans_masks)]
+        ans_only_token_level_labels =  torch.stack([h*m for h, m in zip(expanded_token_level_labels, expanded_ans_masks)])
+
+        target_hl_30_embds = [h[m.bool()] for h, m in zip(hidden_layers[30], ans_only_token_level_labels)]
+        target_hl_24_embds = [h[m.bool()] for h, m in zip(hidden_layers[24], ans_only_token_level_labels)]
+        target_token_2_bb_masks = [h[m.bool()] for h, m in zip(expanded_token_2_bb_masks, ans_only_token_level_labels)]
+        response_ids = [h[m.bool()] for h, m in zip(expanded_input_ids, ans_only_token_level_labels)]
+        
+        image_tokens_h1_30_embds = [ h[m == -200] for h, m in zip(hidden_layers[30], expanded_input_ids)]
+        image_tokens_h1_24_embds = [ h[m == -200] for h, m in zip(hidden_layers[24], expanded_input_ids)]
 
         if mode == "train":
             flatern_hl_30_embds = torch.stack([j for i in target_hl_30_embds for j in i]).detach().clone().float().cuda()
             flatern_hl_24_embds = torch.stack([j for i in target_hl_24_embds for j in i]).detach().clone().float().cuda()
-            flatern_target_labels = torch.stack([j for i in target_labels for j in i]).detach().clone().long().cuda()
+            flatern_target_token_2_bb_masks = torch.stack([j for i in target_token_2_bb_masks for j in i]).detach().clone().long().cuda()
+            # flatern_image_tokens_h1_30_embds = torch.stack([i for i,j in zip(image_tokens_h1_30_embds, target_hl_30_embds) for k in range(j.shape[0])]).detach().clone().float().cuda()
 
             flatern_hl_30_embds.requires_grad_(False)
             flatern_hl_24_embds.requires_grad_(False)
-            flatern_target_labels.requires_grad_(False)
-            
+            flatern_target_token_2_bb_masks.requires_grad_(False)
+
             del (
                 input_ids,
                 output_ids,
@@ -156,14 +148,18 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
                 expanded_input_ids,
                 expanded_token_level_labels,
                 expanded_ans_masks,
+                expanded_token_2_bb_masks,
+                ans_only_token_level_labels,
                 target_hl_30_embds,
                 target_hl_24_embds,
                 target_labels,
+                target_token_2_bb_masks
+                
             )
             torch.cuda.empty_cache()
-            
-            return flatern_hl_30_embds, flatern_hl_24_embds, flatern_target_labels
-        
+
+            return image_tokens_h1_30_embds, image_tokens_h1_24_embds, flatern_hl_30_embds, flatern_hl_24_embds, flatern_target_token_2_bb_masks
+
         elif mode == "eval":
             target_hl_30_embds = [i.detach().clone().float().cuda() for i in  target_hl_30_embds]
             target_hl_24_embds = [i.detach().clone().float().cuda() for i in  target_hl_24_embds]
@@ -209,9 +205,9 @@ def train_batch_model(args):
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
 
-    dataset_name="holoc_total_train_gemini_labels"
+    dataset_name="coco_evidence_head_train"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64*2, batch_size=64*2, shuffle=True)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=128, batch_size=128, shuffle=True)
     
     detection_head_30 = HaluDetectionHead30().cuda()
     detection_head_24 = HaluDetectionHead24().cuda()
@@ -299,7 +295,7 @@ def eval_batch_model(args):
     detection_head_30 = HaluDetectionHead24().cuda()
     detection_head_30.load_state_dict(detection_head_30_weights)
 
-    dataset_name="chair_caption_gen"
+    dataset_name="coco_evidence_head_train"
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=16, batch_size=16, shuffle=False)
     
@@ -342,5 +338,5 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=25)
     args = parser.parse_args()
 
-    eval_batch_model(args)
-    # train_batch_model(args)
+    # eval_batch_model(args)
+    train_batch_model(args)

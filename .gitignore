@@ -10,3 +10,4 @@ haloc/
 head_checkpoints/
 evidence_head_train_datasets/
 large_image_datasets/
+hal_detection_head_train_datasets/

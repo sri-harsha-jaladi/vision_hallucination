@@ -6,3 +6,9 @@ nltk_data/
 testing_res/
 trained_mm_projections/
 halu_detection_mitigation/
+evidence_head_train_datasets/
+hal_detection_head_train_datasets/
+haloc/
+head_checkpoints/
+large_image_datasets/
+visual_genome/

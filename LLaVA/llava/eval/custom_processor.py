@@ -366,15 +366,24 @@ class LlaVaProcessor:
                 mat_tokens_full = find_covering_indices(token_offsets, value)
                 mat_tokens = [dummy_token_offset_count + sublist[-1] for sublist in mat_tokens_full if sublist]
                 all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": 1})
+            try:
+                df = pd.DataFrame(all_mat_tokens)
+                bb_df = pd.DataFrame(candidates_bb_info)
+                bb_df = bb_df.rename(columns= {"word": "token"})
+                bb_df["token"] = bb_df["token"].apply(lambda x: x.lower())
+                final_df = pd.merge(df, bb_df, on="token", how="left")
+                final_df = final_df.dropna(subset=["mat_tokens", "bbox"])
+
+                mask = final_df["mat_tokens"].map(lambda x: len(x) > 0 if isinstance(x, (list)) else False) & final_df["bbox"].map(lambda x: len(x) > 0 if isinstance(x, (list)) else False)
+                final_df = final_df[mask]
+                if final_df.shape[0] == 0:
+                    continue
+              
+                exploded = final_df.explode("mat_tokens")
+            except Exception as e:
+                print(e)
+                print("error in dataframe creation")
             
-            df = pd.DataFrame(all_mat_tokens)
-            bb_df = pd.DataFrame(candidates_bb_info)
-            bb_df = bb_df.rename(columns= {"word": "token"})
-            final_df = pd.merge(df, bb_df, on="token", how="left")
-            final_df = final_df.dropna(subset=["mat_tokens", "bbox"])
-            final_df = final_df[final_df["mat_tokens"].apply(lambda x: len(x)>0)]
-            final_df = final_df[final_df["bbox"].apply(lambda x: len(x)>0)]
-            exploded = final_df.explode("mat_tokens")
             
             
             def majority_label(labels):
@@ -421,10 +430,13 @@ class LlaVaProcessor:
                     start_idx = pos.item()
                     end_idx = pos.item() + len(target) - 1
                     break
-            
-            ans_mask = torch.arange(re_tokenized_input_ids_w_pad.shape[0])
-            ans_mask = (ans_mask >= end_idx+1).to(torch.int)
-            all_answer_masks.append(ans_mask)
+            try:
+                ans_mask = torch.arange(re_tokenized_input_ids_w_pad.shape[0])
+                ans_mask = (ans_mask >= end_idx+1).to(torch.int)
+                all_answer_masks.append(ans_mask)
+            except Exception as e:
+                print(e)
+                print("error in answer mask creation")
             
             token_level_labels.append(tensor)
             input_batch.append(re_tokenized_input_ids_w_pad)
@@ -553,3 +565,13 @@ def get_dataset(dataset_name: str):
     elif dataset_name == "coco_evidence_head_train":
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/coco_long_captions/downscaled_total_coco_evidence_head_train_data_15k.csv")
         return df.to_dict("records")
+    
+    elif dataset_name == "total_evidence_head_train":
+        coco_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/coco_long_captions/downscaled_total_coco_evidence_head_train_data_15k.csv")
+        haloc_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/holoc/downscaled_total_holoc_evidence_head_train_data_60k.csv")
+        flicker_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/flicker/downscaled_total_flickr_evidence_head_train_data_30k.csv")
+        finecops_ref = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/finecops_ref/downscaled_total_finecops_ref_evidence_head_train_data_30k.csv")
+        total_df = pd.concat([coco_df, haloc_df, flicker_df, finecops_ref])
+        total_df = total_df.sample(frac=1)
+        return total_df.to_dict("records")
+

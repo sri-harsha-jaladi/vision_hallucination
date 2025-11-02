@@ -105,7 +105,7 @@ def batch_eval_model(args):
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
 
-    dataset_name="amber"
+    dataset_name="pope"
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=32, batch_size=32)
 
@@ -125,14 +125,14 @@ def batch_eval_model(args):
     
     result_df = pd.concat(all_dfs)
     if dataset_name == "chair":
-        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/chair_llava_plus_des_embed_20_des.jsonl", lines=True, orient="records")
+        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/chair_llava_base_des_02_11_2025.jsonl", lines=True, orient="records")
     elif dataset_name == "pope":
-        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/pope_llava_plus_des_embed_20_des.jsonl", lines=True, orient="records")
+        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/pope_llava_base_des_02_11_2025.jsonl", lines=True, orient="records")
     elif dataset_name == "amber":
         req_df = result_df[["question_id", "generated_captions"]]
         req_df.columns = ["id", "response"]
-        req_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_gen_llava_res.json", lines=True, orient="records")
-        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_gen_llava_all_res.json", lines=True, orient="records")
+        req_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_llava_base_des_02_11_2025.json", lines=True, orient="records")
+        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_llava_base_des_all_res_02_11_2025.json", lines=True, orient="records")
 
 
 def eval_model(args):

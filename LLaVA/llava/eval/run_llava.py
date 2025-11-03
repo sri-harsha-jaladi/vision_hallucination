@@ -2,6 +2,9 @@ import argparse
 import torch
 import torch.optim as optim
 import torch.nn as nn
+import math
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 
 from llava.constants import (
     IMAGE_TOKEN_INDEX,
@@ -89,24 +92,6 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
                 handle = layer.register_forward_hook(save_hook(i))
                 handles.append(handle)
         
-        
-
-        # output_ids = model.generate(
-        #     input_ids,
-        #     attention_mask = attention_mask,
-        #     images=image_tensor.half().cuda(),
-        #     do_sample=True if args.temperature > 0 else False,
-        #     temperature=args.temperature,
-        #     top_p=args.top_p,
-        #     num_beams=args.num_beams,
-        #     max_new_tokens=args.max_new_tokens,
-        #     use_cache=True,
-        #     stopping_criteria=stopping_criteria,
-        #     # num_return_sequences=num_return_sequences,
-        # )
-        # generated_outputs = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-        # generated_outputs = [out.strip() for out in generated_outputs]
-        # generated_outputs = [out[: -len(stop_str)] if out.endswith(stop_str) else out for out in generated_outputs]
         
         with torch.inference_mode():
             output_ids = model.forward(
@@ -211,24 +196,32 @@ def train_batch_model(args):
 
     dataset_name="holoc_total_train_gemini_labels"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64*2, batch_size=64*2, shuffle=True)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=True)
     
-    detection_head_30 = HaluDetectionHead30().cuda()
     detection_head_24 = HaluDetectionHead24().cuda()
     
-    # num_gpus = torch.cuda.device_count()
-    # if num_gpus >         1:
-    #     detection_head_30 = nn.DataParallel(detection_head_30)
-    #     detection_head_24 = nn.DataParallel(detection_head_24)
+    optimizer_detection_head_24 = AdamW(detection_head_24.parameters(), lr=1e-3, weight_decay=1e-4, betas=(0.9, 0.999))
+    
+    steps_per_epoch = len(dataloader)
+    num_epochs = 1                             # <- set this
+    total_steps = steps_per_epoch * num_epochs
+    warmup_steps = int(0.1 * total_steps)     # 10% warmup
+    min_lr_ratio = 0.05
+    
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return float(step + 1) / float(max(1, warmup_steps))
+        # cosine decay from 1.0 -> min_lr_ratio
+        progress = (step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_lr_ratio + (1 - min_lr_ratio) * cosine
     
     with torch.no_grad():
-        print("just init 30:", any(torch.isnan(p).any() for p in detection_head_30.parameters()))
         print("just init 24:", any(torch.isnan(p).any() for p in detection_head_24.parameters()))
     
+    sched_optimizer_detection_head_24 = LambdaLR(optimizer_detection_head_24, lr_lambda)
     criterion = nn.CrossEntropyLoss()
-    
-    optimizer_30 = optim.Adam(detection_head_30.parameters(), lr=1e-3)
-    optimizer_24 = optim.Adam(detection_head_24.parameters(), lr=1e-3)
+
 
     step = 0
     for batch in tqdm(dataloader, desc=f"step: training detection head"):
@@ -236,41 +229,27 @@ def train_batch_model(args):
         flatern_hl_30_embds, flatern_hl_24_embds, flatern_target_labels = generate_llava(batch, tokenizer, model, processor)
         
         labels_mapped = torch.where(flatern_target_labels == -1, 0, torch.where(flatern_target_labels == 0, 1, 2))
-        detection_head_30.train()
         detection_head_24.train()
-        
-        optimizer_30.zero_grad()
-        logits_30 = detection_head_30(flatern_hl_30_embds)
-        loss_30 = criterion(logits_30, labels_mapped)
-        loss_30.backward()
-        optimizer_30.step()
-        
-        batch_loss_30 = loss_30.item() * flatern_hl_30_embds.shape[0]
 
-        optimizer_24.zero_grad()
+        optimizer_detection_head_24.zero_grad(set_to_none=True)
         logits_24 = detection_head_24(flatern_hl_24_embds)
         loss_24 = criterion(logits_24, labels_mapped)
         loss_24.backward()
-        optimizer_24.step()
+        
+        optimizer_detection_head_24.step()
+        sched_optimizer_detection_head_24.step()
 
-        batch_loss_24 = loss_24.item() * flatern_hl_24_embds.shape[0]
-
-
-        print(f"30 Batch loss: {batch_loss_30:.4f}, 30 Avg loss: {loss_30.item():.4f}")
-        print(f"24 Batch loss: {batch_loss_24:.4f}, 24 Avg loss: {loss_24.item():.4f}")
+        print(f"24 Avg loss: {loss_24.item():.4f}")
         wandb.log({
             "step": step,
-            "batch_loss_30": batch_loss_30,
-            "batch_loss_24": batch_loss_24,
-            "avg_loss_30": loss_30.item(),
             "avg_loss_24": loss_24.item(),
-            "lr_30": optimizer_30.param_groups[0]["lr"],
-            "lr_24": optimizer_24.param_groups[0]["lr"]
+            "lr_24": optimizer_detection_head_24.param_groups[0]["lr"]
         })
         step += 1
-
-    torch.save(detection_head_30.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_head_30l_26_20_2024_d_8192.bin")
-    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_head_24l_26_20_2024_d_8192.bin")
+        if step in [500,1000,1500,2000, 2500]:
+            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_{step}_03_11_2024.bin")
+        
+    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_03_11_2024.bin")
 
     torch.cuda.empty_cache()
     
@@ -342,5 +321,5 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=25)
     args = parser.parse_args()
 
-    eval_batch_model(args)
-    # train_batch_model(args)
+    # eval_batch_model(args)
+    train_batch_model(args)

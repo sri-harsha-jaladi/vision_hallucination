@@ -229,12 +229,12 @@ class LlaVaProcessor:
             all_mat_tokens = []
             for key, value in hal_tokens_inx.items():
                 mat_tokens = find_covering_indices(token_offsets, value)
-                mat_tokens = [dummy_token_offset_count + item for sublist in mat_tokens for item in sublist]
+                mat_tokens = [dummy_token_offset_count + sublist[-1] for sublist in mat_tokens if sublist]
                 all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": -1})
             
             for key, value in non_hal_tokens_inx.items():
                 mat_tokens = find_covering_indices(token_offsets, value)
-                mat_tokens = [dummy_token_offset_count + item for sublist in mat_tokens for item in sublist]
+                mat_tokens = [dummy_token_offset_count + sublist[-1] for sublist in mat_tokens if sublist]
                 all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": 1})
             
             df = pd.DataFrame(all_mat_tokens)
@@ -391,7 +391,9 @@ def get_dataset(dataset_name: str):
         df_1 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/instruct/gemini_labeled_40k.csv")
         df_2 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tp_data.csv")
         df_3 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tn_data.csv")
-        total_df = pd.concat([df, df_1, df_2, df_3])
+        coco_data = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/coco/gemini_labeld_15k.csv")
+        total_df = pd.concat([df, df_1, df_2, df_3, coco_data])
+        total_df = total_df.drop(["candidates_inx", "hallucination_candidates_inx"], axis=1)
         total_df = total_df.sample(frac=1)
         return total_df.to_dict("records")
 

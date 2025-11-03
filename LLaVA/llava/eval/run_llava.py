@@ -239,7 +239,7 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
 
             return target_hl_30_embds, target_hl_24_embds, target_token_2_bb_masks, image_tokens_h1_30_embds, image_tokens_h1_24_embds
 
-def generate_llava_eval(batch, tokenizer, model, processor, max_length=128, do_sample=True, num_return_sequences=3):
+def llava_forward_halu_detect(batch, tokenizer, model, processor, max_length=128, do_sample=True, num_return_sequences=3):
 
         conv = conv_templates[processor.conv_mode].copy()
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
@@ -250,7 +250,6 @@ def generate_llava_eval(batch, tokenizer, model, processor, max_length=128, do_s
         input_ids = batch["input_ids"]
         image_tensor = batch["image_tensors"]
         input_ids = input_ids.cuda()
-        token_level_labels = batch["token_level_labels"].cuda()
         ans_masks = batch["answer_masks"].cuda()
         
         attention_mask = (input_ids != tokenizer.pad_token_id).int()
@@ -282,28 +281,20 @@ def generate_llava_eval(batch, tokenizer, model, processor, max_length=128, do_s
             
 
         expanded_input_ids = []
-        expanded_token_level_labels = []
         expanded_ans_masks = []
-        img_token_position = []
-        for input_id, token_level_labels, ans_mask in zip(input_ids, token_level_labels, ans_masks):
+        for input_id, ans_mask in zip(input_ids, ans_masks):
             
             img_token_position = torch.where(input_id==-200)[0].tolist()[0]
             expanded_input_ids.append(torch.cat((input_id[:img_token_position], torch.full((575,), -200, device=input_id.device), input_id[img_token_position:])))
-            expanded_token_level_labels.append(torch.cat((token_level_labels[:img_token_position], torch.full((575,), 0, device=token_level_labels.device), token_level_labels[img_token_position:])))
             expanded_ans_masks.append(torch.cat((ans_mask[:img_token_position], torch.full((575,), 0, device=ans_mask.device), ans_mask[img_token_position:])))
         
         expanded_input_ids = torch.stack(expanded_input_ids).cpu()
-        expanded_token_level_labels = torch.stack(expanded_token_level_labels).cpu()
         expanded_ans_masks = torch.stack(expanded_ans_masks).cpu()
 
-        ans_only_token_level_labels =  torch.stack([h*m for h, m in zip(expanded_token_level_labels, expanded_ans_masks)])
-
-        target_hl_30_embds = [(h[m.bool()]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], ans_only_token_level_labels)]
-        target_hl_24_embds = [(h[m.bool()]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], ans_only_token_level_labels)]
-        response_ids = [(h[m.bool()]).detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_input_ids, ans_only_token_level_labels)]
-
-        image_tokens_h1_30_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], expanded_input_ids)]
-        image_tokens_h1_24_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], expanded_input_ids)]
+        target_hl_24_embds = [(h[m.bool()]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], expanded_ans_masks)]
+        response_ids = [(h[m.bool()]).detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_input_ids, expanded_ans_masks)]
+        
+        image_tokens_h1_24_embds = [(h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], expanded_input_ids)]
 
       
         del (
@@ -313,9 +304,7 @@ def generate_llava_eval(batch, tokenizer, model, processor, max_length=128, do_s
             image_tensor,
             ans_masks,
             expanded_input_ids,
-            expanded_token_level_labels,
             expanded_ans_masks,
-            ans_only_token_level_labels,
             # target_hl_30_embds,
             # target_hl_24_embds,
             # target_labels,
@@ -324,7 +313,7 @@ def generate_llava_eval(batch, tokenizer, model, processor, max_length=128, do_s
         )
         torch.cuda.empty_cache()
 
-        return target_hl_30_embds, target_hl_24_embds, image_tokens_h1_30_embds, image_tokens_h1_24_embds
+        return target_hl_24_embds, response_ids, image_tokens_h1_24_embds
 
 
 
@@ -463,6 +452,97 @@ def train_batch_model(args):
     torch.cuda.empty_cache()
 
 
+
+
+from typing import List, Union
+import torch
+
+from typing import List, Union
+import torch
+
+def words_with_label(tokenizer,
+                             input_ids: Union[List[int], torch.Tensor],
+                             labels: Union[List[int], torch.Tensor],
+                             target_label: int = 2,
+                             strict_count_check: bool = False) -> List[str]:
+    """
+    Group subword tokens back into words and repeat each word as many times
+    as the number of its tokens that equal `target_label`.
+
+    - Supports SentencePiece ('▁') and GPT2/BPE ('Ġ') word-start markers.
+    - Skips special tokens entirely.
+    - If `strict_count_check` is True, asserts that the number of returned
+      words equals the total number of tokens with label == target_label.
+    """
+    if isinstance(input_ids, torch.Tensor):
+        input_ids = input_ids.detach().cpu().tolist()
+    if isinstance(labels, torch.Tensor):
+        labels = labels.detach().cpu().tolist()
+
+    assert len(input_ids) == len(labels), "input_ids and labels must have the same length"
+
+    toks = tokenizer.convert_ids_to_tokens(input_ids, skip_special_tokens=False)
+    special_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+    start_markers = ("▁", "Ġ")
+
+    out_words: List[str] = []
+
+    cur_word_pieces: List[str] = []
+    cur_count_target = 0
+    in_word = False
+
+    def flush():
+        nonlocal cur_word_pieces, cur_count_target, in_word
+        if in_word and cur_word_pieces:
+            word = "".join(cur_word_pieces)
+            if word and cur_count_target > 0:
+                out_words.extend([word] * cur_count_target)
+        cur_word_pieces = []
+        cur_count_target = 0
+        in_word = False
+
+    for tid, tok, lab in zip(input_ids, toks, labels):
+        # Skip special tokens entirely
+        if tid in special_ids or tok is None:
+            flush()
+            continue
+
+        starts_new = tok.startswith(start_markers)
+
+        if starts_new:
+            # finish previous word
+            flush()
+            in_word = True
+            # strip marker and start a new word
+            base = tok.lstrip("▁").lstrip("Ġ")
+            cur_word_pieces = [base]
+            cur_count_target = 1 if lab == target_label else 0
+        else:
+            # continuation piece
+            if not in_word:
+                # tokenizer without explicit markers: begin here
+                in_word = True
+                cur_word_pieces = [tok]
+                cur_count_target = 1 if lab == target_label else 0
+            else:
+                cur_word_pieces.append(tok)
+                if lab == target_label:
+                    cur_count_target += 1
+
+    # flush the last word
+    flush()
+
+    if strict_count_check:
+        total_target = sum(int(l == target_label) for l in labels)
+        assert total_target == len(out_words), (
+            f"Count mismatch: labels have {total_target} occurrences of {target_label}, "
+            f"but returned {len(out_words)} words."
+        )
+
+    return out_words
+
+
+
 def eval_batch_model(args):
     disable_torch_init()
     model_name = get_model_name_from_path(args.model_path)
@@ -481,35 +561,69 @@ def eval_batch_model(args):
     
     model.config.tokenizer_padding_side = tokenizer.padding_side = "left"
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
-
+    
+    # evidence head loading
     evidence_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/evidence/single_head_strict_train_24l_01_11_2024_d_4096.bin", map_location='cuda')
-    single_head_24 = SingleHeadQueryAwareScorer( d = 4096, d_k = 512, mlp_hidden = 512).cuda()
+    single_head_24 = SingleHeadQueryAwareScorer(d = 4096, d_k = 512, mlp_hidden = 512).cuda()
     single_head_24.load_state_dict(evidence_head_24_weights)
+    
+    # detection head loading
+    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_1000_03_11_2024.bin", map_location='cuda')
+    detection_head_24 = HaluDetectionHead24().cuda()
+    detection_head_24.load_state_dict(detection_head_24_weights)
+    
 
-    dataset_name="chair"
-    collate_fn = collate_fn_builder(processor, None, mode = "eval")
+    dataset_name="pope"
+    collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=False)
+
     
     single_head_24.eval()
-    all_dfs = []
-    for batch in tqdm(dataloader, desc="storing embds"):
-        target_hl_30_embds, target_hl_24_embds, image_tokens_h1_30_embds, image_tokens_h1_24_embds = generate_llava_eval(batch, tokenizer, model, processor)
+    detection_head_24.eval()
 
-        target_columns = ['question', 'answer', 'question_id', 'image_id', 'image_path', 'candidates']
-        all_seq_img_imp_scores = []
-        for hl_30_embd, hl_24_embd, img_token_h1_30_embd, img_token_h1_24_embd, candidates in zip(target_hl_30_embds, target_hl_24_embds, image_tokens_h1_30_embds, image_tokens_h1_24_embds, batch["candidates"]):
-            single_pred = single_head_24.predict_proba(img_tokens = img_token_h1_24_embd, text_tokens = hl_24_embd)
-            img_token_imp_score = build_importance(single_pred)
-            all_seq_img_imp_scores.append(img_token_imp_score[0].cpu().numpy())
+    all_dfs = []
+    target_columns = ['question', 'answer', 'question_id', 'image_id', 'image_path']
+    for batch in tqdm(dataloader, desc="storing embds"):
+        target_hl_24_embds, response_ids, image_tokens_h1_24_embds = llava_forward_halu_detect(batch, tokenizer, model, processor)
+
+        batch_res = []
+        for hl_24_embd, response_id, image_tokens_hl_24_embd in zip(target_hl_24_embds, response_ids, image_tokens_h1_24_embds):
+            hal_pred, hal_probs = detection_head_24.predict(hl_24_embd)
+            non_halu_words = words_with_label(tokenizer, input_ids=response_id, labels=hal_pred, target_label=2)
+            halu_words = words_with_label(tokenizer, input_ids=response_id, labels=hal_pred, target_label=0)
+            
+            non_halu_hl_24_embd = hl_24_embd[hal_pred == 2]
+            halu_hl_24_embd = hl_24_embd[hal_pred == 0]
+            
+            res = []
+            
+            if non_halu_hl_24_embd.shape[0] != 0:
+                assert len(non_halu_words) == non_halu_hl_24_embd.shape[0], "mismatch in non-halu words and embeddings"
+                evidence_head_24_non_halu_pred = single_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=non_halu_hl_24_embd)
+                for word, evidence in zip(non_halu_words, evidence_head_24_non_halu_pred):
+                    res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": "non-halu"})
+
+            if halu_hl_24_embd.shape[0] != 0:
+                assert len(halu_words) == halu_hl_24_embd.shape[0], "mismatch in halu words and embeddings"
+                evidence_head_24_halu_pred = single_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=halu_hl_24_embd)
+                for word, evidence in zip(halu_words, evidence_head_24_halu_pred):
+                    res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": "halu"})
+            
+            batch_res.append(res)
+
         
         target_values = {i:batch[i]  for i in target_columns}
         df = pd.DataFrame(target_values)
-        df["img_token_imp_scores"] = all_seq_img_imp_scores
+        df["labels_with_evidence"] = batch_res
         all_dfs.append(df)
 
     total_df = pd.concat(all_dfs)
-    total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_test_datasets/chair/base_des_imp_scores_01_11_2025.pkl")
+    if dataset_name == "chair":
+        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/chair/base_des_label_with_evidence_01_11_2025.pkl")
 
+    elif dataset_name == "pope":
+        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/pope_llava_label_with_evidence_des_01_11_2025.pkl")
+        
 
 
 if __name__ == "__main__":

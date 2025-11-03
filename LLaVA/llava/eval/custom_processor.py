@@ -308,7 +308,7 @@ class LlaVaProcessor:
 
         return image_tensor, input_ids
 
-    def get_processed_tokens_batch(self, batch_text: List[str], images: Union[List[str], List[Image.Image]], batch_answers: List[str], batch_candidates: List[str], batch_hallucination_candidates: List[str]):
+    def get_processed_tokens_batch(self, batch_text: List[str], images: Union[List[str], List[Image.Image]], batch_answers: List[str]):
         prompt = [self.format_text(text, answer) for text, answer in zip(batch_text, batch_answers)]
         # check if image_paths is a list of images or a list of image paths
         if type(images[0]) is str:
@@ -326,334 +326,112 @@ class LlaVaProcessor:
         
         ##token level hallucination label
     
-        token_level_labels = []
-        input_batch = []
-        all_answer_masks = []
-        all_token_2_bb_masks = []
-        for input_ids, candidate_tokens, hal_tokens in zip(batch_input_ids, batch_candidates, batch_hallucination_candidates):
-            img_token_pos = torch.where(input_ids==-200)[0]
-            special_start_token = torch.where(input_ids==1)[0]
-            input_ids_wo_padding = input_ids[input_ids!=0]
-            img_token_position_wo_pad = torch.where(input_ids_wo_padding==-200)[0]
-            input_ids = torch.cat([input_ids[special_start_token+1:img_token_pos], input_ids[img_token_pos+1:]])
-            text = self.tokenizer.decode(input_ids)
-            res_start_inx = text.find('ASSISTANT')
-            response_text = text[res_start_inx:]
-            query_text = text[:res_start_inx]
+        # token_level_labels = []
+        # input_batch = []
+        # all_answer_masks = []
+        # for input_ids, candidate_tokens, hal_tokens in zip(batch_input_ids):
+        #     img_token_pos = torch.where(input_ids==-200)[0]
+        #     special_start_token = torch.where(input_ids==1)[0]
+        #     input_ids_wo_padding = input_ids[input_ids!=0]
+        #     img_token_position_wo_pad = torch.where(input_ids_wo_padding==-200)[0]
+        #     input_ids = torch.cat([input_ids[special_start_token+1:img_token_pos], input_ids[img_token_pos+1:]])
+        #     text = self.tokenizer.decode(input_ids)
+        #     res_start_inx = text.find('ASSISTANT')
+        #     response_text = text[res_start_inx:]
+        #     query_text = text[:res_start_inx]
             
-            candidates_bb_info = candidate_tokens
-            non_hal_tokens = [i["word"] for i in candidates_bb_info]
+        #     non_hal_tokens = list(set(candidate_tokens) - set(hal_tokens))
             
-            hal_tokens_inx = find_word_spans(response_text.lower(), [i.lower() for i in hal_tokens])
-            non_hal_tokens_inx = find_word_spans(response_text.lower(), [i.lower() for i in non_hal_tokens])
-            offset = len(query_text)
-            hal_tokens_inx = {key: [(start + offset, end + offset-1) for (start, end) in value] for key, value in hal_tokens_inx.items()}
-            non_hal_tokens_inx = {key: [(start + offset, end + offset-1) for (start, end) in value] for key, value in non_hal_tokens_inx.items()}
+        #     hal_tokens_inx = find_word_spans(response_text.lower(), [i.lower() for i in hal_tokens])
+        #     non_hal_tokens_inx = find_word_spans(response_text.lower(), [i.lower() for i in non_hal_tokens])
+        #     offset = len(query_text)
+        #     hal_tokens_inx = {key: [(start + offset, end + offset-1) for (start, end) in value] for key, value in hal_tokens_inx.items()}
+        #     non_hal_tokens_inx = {key: [(start + offset, end + offset-1) for (start, end) in value] for key, value in non_hal_tokens_inx.items()}
             
-            re_tokenized_input_ids = self.tokenizer(text, add_special_tokens=True, return_offsets_mapping=True, padding="max_length", max_length=batch_input_ids.shape[1], return_tensors="pt")
+        #     re_tokenized_input_ids = self.tokenizer(text, add_special_tokens=True, return_offsets_mapping=True, padding="max_length", max_length=batch_input_ids.shape[1], return_tensors="pt")
             
-            dummy_token_offset_count = (re_tokenized_input_ids["offset_mapping"][0] == torch.tensor([0, 0])).all(dim=1).sum().item()
-            token_offsets = [(i[0], i[1]-1) for i in re_tokenized_input_ids["offset_mapping"][0].tolist()[dummy_token_offset_count:]]
+        #     dummy_token_offset_count = (re_tokenized_input_ids["offset_mapping"][0] == torch.tensor([0, 0])).all(dim=1).sum().item()
+        #     token_offsets = [(i[0], i[1]-1) for i in re_tokenized_input_ids["offset_mapping"][0].tolist()[dummy_token_offset_count:]]
 
-            all_mat_tokens = []
-            assert len(hal_tokens_inx) == 0, "hallucination tokens must be empty"
-            for key, value in hal_tokens_inx.items():
-                mat_tokens = find_covering_indices(token_offsets, value)
-                mat_tokens = [dummy_token_offset_count + item for sublist in mat_tokens for item in sublist]
-                all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": -1})
+        #     all_mat_tokens = []
+        #     for key, value in hal_tokens_inx.items():
+        #         mat_tokens = find_covering_indices(token_offsets, value)
+        #         mat_tokens = [dummy_token_offset_count + sublist[-1] for sublist in mat_tokens if sublist]
+        #         all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": -1})
             
-            for key, value in non_hal_tokens_inx.items():
-                mat_tokens_full = find_covering_indices(token_offsets, value)
-                mat_tokens = [dummy_token_offset_count + sublist[-1] for sublist in mat_tokens_full if sublist]
-                all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": 1})
-            try:
-                df = pd.DataFrame(all_mat_tokens)
-                bb_df = pd.DataFrame(candidates_bb_info)
-                bb_df = bb_df.rename(columns= {"word": "token"})
-                bb_df["token"] = bb_df["token"].apply(lambda x: x.lower())
-                final_df = pd.merge(df, bb_df, on="token", how="left")
-                final_df = final_df.dropna(subset=["mat_tokens", "bbox"])
+        #     for key, value in non_hal_tokens_inx.items():
+        #         mat_tokens = find_covering_indices(token_offsets, value)
+        #         mat_tokens = [dummy_token_offset_count + sublist[-1] for sublist in mat_tokens if sublist]
+        #         all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": 1})
+            
+        #     df = pd.DataFrame(all_mat_tokens)
+        #     exploded = df.explode("mat_tokens")
+            
+        #     def majority_label(labels):
+        #         counts = Counter(labels)
+        #         return counts.most_common(1)[0][0]
 
-                mask = final_df["mat_tokens"].map(lambda x: len(x) > 0 if isinstance(x, (list)) else False) & final_df["bbox"].map(lambda x: len(x) > 0 if isinstance(x, (list)) else False)
-                final_df = final_df[mask]
-                if final_df.shape[0] == 0:
-                    continue
-              
-                exploded = final_df.explode("mat_tokens")
-            except Exception as e:
-                print(e)
-                print("error in dataframe creation")
+        #     mapping = (exploded.groupby("mat_tokens")["label"].apply(majority_label).to_dict())
+            
+        #     tensor = torch.zeros(batch_input_ids.shape[1], dtype=torch.int)
+        #     for idx, val in mapping.items():
+        #         tensor[idx] = val
             
             
-            
-            def majority_label(labels):
-                counts = Counter(labels)
-                return counts.most_common(1)[0][0]
+        #     re_tokenized_input_ids_wo_pad = re_tokenized_input_ids["input_ids"][0][re_tokenized_input_ids["input_ids"][0] !=0]
+        #     adjust_values = input_ids_wo_padding[img_token_position_wo_pad-1:img_token_position_wo_pad+2]
+        #     re_tokenized_input_ids_wo_pad = torch.cat([re_tokenized_input_ids_wo_pad[:img_token_position_wo_pad-1], adjust_values, re_tokenized_input_ids_wo_pad[img_token_position_wo_pad:]])
 
-            mapping = (exploded.groupby("mat_tokens")["label"].apply(majority_label).to_dict())
-            
-            mapping = {}
-            bb_token_mapping = {}
-            for inx, row in exploded.iterrows():
-                mapping[row["mat_tokens"]] = row["label"]
-                bb_token_mapping[row["mat_tokens"]] = row["bbox"]
-                
-            tensor = torch.zeros(batch_input_ids.shape[1], dtype=torch.int)
-            for idx, val in mapping.items():
-                tensor[idx] = val
-            
-            exp_token_2_bb = torch.zeros((batch_input_ids.shape[1], 576), dtype=torch.int)
-            try:
-                for idx, val in bb_token_mapping.items():
-                    bb_mask =  bbox_patch_binary_masks(image_w=336, image_h=336, bboxes=val, patch_w=14, patch_h=14)
-                    flattern_bb_mask = combine_mask_tensor(bb_mask, out_dtype=torch.int)
-                    exp_token_2_bb[idx] = flattern_bb_mask
-            except Exception as e:
-                print(e)
-                print("error in bb mask creation")
-
-            re_tokenized_input_ids_wo_pad = re_tokenized_input_ids["input_ids"][0][re_tokenized_input_ids["input_ids"][0] !=0]
-            adjust_values = input_ids_wo_padding[img_token_position_wo_pad-1:img_token_position_wo_pad+2]
-            re_tokenized_input_ids_wo_pad = torch.cat([re_tokenized_input_ids_wo_pad[:img_token_position_wo_pad-1], adjust_values, re_tokenized_input_ids_wo_pad[img_token_position_wo_pad:]])
-
-            pad_len = batch_input_ids.shape[1] - re_tokenized_input_ids_wo_pad.shape[0]
-            re_tokenized_input_ids_w_pad = F.pad(re_tokenized_input_ids_wo_pad, (pad_len, 0), mode='constant', value=self.tokenizer.pad_token_id)
+        #     pad_len = batch_input_ids.shape[1] - re_tokenized_input_ids_wo_pad.shape[0]
+        #     re_tokenized_input_ids_w_pad = F.pad(re_tokenized_input_ids_wo_pad, (pad_len, 0), mode='constant', value=self.tokenizer.pad_token_id)
         
-            # answer mask
-            target = torch.tensor([319, 1799, 9047, 13566, 29901])  # token ids for the word "ASSISTANT:"
-            candidate_positions = (re_tokenized_input_ids_w_pad == target[0]).nonzero(as_tuple=True)[0]
+        # answer mask
+        all_answer_masks = []
+        target = torch.tensor([319, 1799, 9047, 13566, 29901]) 
 
+        for input_ids in batch_input_ids:
+            candidate_positions = (input_ids == target[0]).nonzero(as_tuple=True)[0]
             start_idx, end_idx = None, None
             for pos in candidate_positions:
                 # ensure main slice from pos matches full target
-                if torch.equal(re_tokenized_input_ids_w_pad[pos:pos + len(target)], target):
+                if torch.equal(input_ids[pos:pos + len(target)], target):
                     start_idx = pos.item()
                     end_idx = pos.item() + len(target) - 1
                     break
-            try:
-                ans_mask = torch.arange(re_tokenized_input_ids_w_pad.shape[0])
-                ans_mask = (ans_mask >= end_idx+1).to(torch.int)
-                all_answer_masks.append(ans_mask)
-            except Exception as e:
-                print(e)
-                print("error in answer mask creation")
             
-            token_level_labels.append(tensor)
-            input_batch.append(re_tokenized_input_ids_w_pad)
-            all_token_2_bb_masks.append(exp_token_2_bb)
+            ans_mask = torch.arange(input_ids.shape[0])
+            ans_mask = (ans_mask >= end_idx+1).to(torch.int)
+            all_answer_masks.append(ans_mask)
         
-        batch_input_ids = torch.stack(input_batch)
-        token_level_labels = torch.stack(token_level_labels)
         batch_ans_masks = torch.stack(all_answer_masks)
-        batch_token_2_bb_masks = torch.stack(all_token_2_bb_masks)
-
         
 
         batch_image_tensor = self.image_processor(images, return_tensors="pt")["pixel_values"]
 
-        return batch_image_tensor, batch_input_ids, token_level_labels, batch_ans_masks, batch_token_2_bb_masks
-    
-    
-    def get_processed_tokens_batch_inference(self, batch_text: List[str], images: Union[List[str], List[Image.Image]], batch_answers: List[str], batch_candidates: List[str], batch_hallucination_candidates: List[str]):
-        prompt = [self.format_text(text, answer) for text, answer in zip(batch_text, batch_answers)]
-        # check if image_paths is a list of images or a list of image paths
-        if type(images[0]) is str:
-            images = [self.load_image(image_path) for image_path in images]
-
-        batch_input_ids = [
-            tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt") for prompt in prompt
-        ]
-
-        # Determine the maximum length of input_ids in the batch
-        max_len = max([len(seq) for seq in batch_input_ids])
-        # Pad each sequence in input_ids to the max_len
-        padded_input_ids = [self.pad_sequence_to_max_length(seq.squeeze(), max_len) for seq in batch_input_ids]
-        batch_input_ids = torch.stack(padded_input_ids)
-        
-        ##token level hallucination label
-    
-        token_level_labels = []
-        input_batch = []
-        all_answer_masks = []
-        all_token_2_bb_masks = []
-        for input_ids, candidate_tokens, hal_tokens in zip(batch_input_ids, batch_candidates, batch_hallucination_candidates):
-            img_token_pos = torch.where(input_ids==-200)[0]
-            special_start_token = torch.where(input_ids==1)[0]
-            input_ids_wo_padding = input_ids[input_ids!=0]
-            img_token_position_wo_pad = torch.where(input_ids_wo_padding==-200)[0]
-            input_ids = torch.cat([input_ids[special_start_token+1:img_token_pos], input_ids[img_token_pos+1:]])
-            text = self.tokenizer.decode(input_ids)
-            res_start_inx = text.find('ASSISTANT')
-            response_text = text[res_start_inx:]
-            query_text = text[:res_start_inx]
-            
-            candidates_bb_info = candidate_tokens
-            non_hal_tokens = [i["word"] for i in candidates_bb_info]
-            
-            hal_tokens_inx = find_word_spans(response_text.lower(), [i.lower() for i in hal_tokens])
-            non_hal_tokens_inx = find_word_spans(response_text.lower(), [i.lower() for i in non_hal_tokens])
-            offset = len(query_text)
-            hal_tokens_inx = {key: [(start + offset, end + offset-1) for (start, end) in value] for key, value in hal_tokens_inx.items()}
-            non_hal_tokens_inx = {key: [(start + offset, end + offset-1) for (start, end) in value] for key, value in non_hal_tokens_inx.items()}
-            
-            re_tokenized_input_ids = self.tokenizer(text, add_special_tokens=True, return_offsets_mapping=True, padding="max_length", max_length=batch_input_ids.shape[1], return_tensors="pt")
-            
-            dummy_token_offset_count = (re_tokenized_input_ids["offset_mapping"][0] == torch.tensor([0, 0])).all(dim=1).sum().item()
-            token_offsets = [(i[0], i[1]-1) for i in re_tokenized_input_ids["offset_mapping"][0].tolist()[dummy_token_offset_count:]]
-
-            all_mat_tokens = []
-            assert len(hal_tokens_inx) == 0, "hallucination tokens must be empty"
-            for key, value in hal_tokens_inx.items():
-                mat_tokens = find_covering_indices(token_offsets, value)
-                mat_tokens = [dummy_token_offset_count + item for sublist in mat_tokens for item in sublist]
-                all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": -1})
-            
-            for key, value in non_hal_tokens_inx.items():
-                mat_tokens_full = find_covering_indices(token_offsets, value)
-                mat_tokens = [dummy_token_offset_count + sublist[-1] for sublist in mat_tokens_full if sublist]
-                all_mat_tokens.append({"token": key, "mat_tokens": mat_tokens, "label": 1})
-            
-            final_df = pd.DataFrame(all_mat_tokens)
-
-            mask = final_df["mat_tokens"].map(lambda x: len(x) > 0 if isinstance(x, (list)) else False)
-            final_df = final_df[mask]
-            if final_df.shape[0] == 0:
-                continue
-            exploded = final_df.explode("mat_tokens")
-
-            
-            mapping = {}
-            for inx, row in exploded.iterrows():
-                mapping[row["mat_tokens"]] = row["label"]
-                
-            tensor = torch.zeros(batch_input_ids.shape[1], dtype=torch.int)
-            for idx, val in mapping.items():
-                tensor[idx] = val
-
-            re_tokenized_input_ids_wo_pad = re_tokenized_input_ids["input_ids"][0][re_tokenized_input_ids["input_ids"][0] !=0]
-            adjust_values = input_ids_wo_padding[img_token_position_wo_pad-1:img_token_position_wo_pad+2]
-            re_tokenized_input_ids_wo_pad = torch.cat([re_tokenized_input_ids_wo_pad[:img_token_position_wo_pad-1], adjust_values, re_tokenized_input_ids_wo_pad[img_token_position_wo_pad:]])
-
-            pad_len = batch_input_ids.shape[1] - re_tokenized_input_ids_wo_pad.shape[0]
-            re_tokenized_input_ids_w_pad = F.pad(re_tokenized_input_ids_wo_pad, (pad_len, 0), mode='constant', value=self.tokenizer.pad_token_id)
-        
-            # answer mask
-            target = torch.tensor([319, 1799, 9047, 13566, 29901])  # token ids for the word "ASSISTANT:"
-            candidate_positions = (re_tokenized_input_ids_w_pad == target[0]).nonzero(as_tuple=True)[0]
-
-            start_idx, end_idx = None, None
-            for pos in candidate_positions:
-                # ensure main slice from pos matches full target
-                if torch.equal(re_tokenized_input_ids_w_pad[pos:pos + len(target)], target):
-                    start_idx = pos.item()
-                    end_idx = pos.item() + len(target) - 1
-                    break
-            try:
-                ans_mask = torch.arange(re_tokenized_input_ids_w_pad.shape[0])
-                ans_mask = (ans_mask >= end_idx+1).to(torch.int)
-                all_answer_masks.append(ans_mask)
-            except Exception as e:
-                print(e)
-                print("error in answer mask creation")
-            
-            token_level_labels.append(tensor)
-            input_batch.append(re_tokenized_input_ids_w_pad)
-        
-        batch_input_ids = torch.stack(input_batch)
-        token_level_labels = torch.stack(token_level_labels)
-        batch_ans_masks = torch.stack(all_answer_masks)
-
-
-        batch_image_tensor = self.image_processor(images, return_tensors="pt")["pixel_values"]
-
-        return batch_image_tensor, batch_input_ids, token_level_labels, batch_ans_masks,
-    
-    def get_processed_tokens_batch_gen(self, batch_text: List[str], images: Union[List[str], List[Image.Image]]):
-        prompt = [self.format_text(text) for text in batch_text]
-        # check if image_paths is a list of images or a list of image paths
-        if type(images[0]) is str:
-            images = [self.load_image(image_path) for image_path in images]
-
-        batch_input_ids = [
-            tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt") for prompt in prompt
-        ]
-
-        # Determine the maximum length of input_ids in the batch
-        max_len = max([len(seq) for seq in batch_input_ids])
-        # Pad each sequence in input_ids to the max_len
-        padded_input_ids = [self.pad_sequence_to_max_length(seq.squeeze(), max_len) for seq in batch_input_ids]
-        batch_input_ids = torch.stack(padded_input_ids)
-
-        batch_image_tensor = self.image_processor(images, return_tensors="pt")["pixel_values"]
-
-        return batch_image_tensor, batch_input_ids
+        return batch_image_tensor, batch_input_ids, batch_ans_masks
     
     
 def collate_fn_builder(processor=None, tokenizer=None , mode = "gen"):
     
     def collate_fn(batch):
-        bkeys = ["question", "answer", "question_id", "image", "image_id", "image_path", "candidates", "hallucination_candidates"]
+        bkeys = ["question", "answer", "question_id", "image", "image_id", "image_path"]
         processed_batch = {bkey: [example[bkey] for example in batch] for bkey in bkeys if bkey in batch[0]}
 
         
-        mode = "eval"
-        if mode == "train":
-            batch_images, batch_text, batch_token_labels, batch_ans_masks, batch_token_2_bb_masks = processor.get_processed_tokens_batch(
-                [example["question"] for example in batch],
-                [example["image_path"] for example in batch],
-                [example["answer"] for example in batch],
-                [example["candidates"] for example in batch],
-                [example["hallucination_candidates"] for example in batch]
-            )
-
-            processed_batch["image_tensors"] = batch_images
-            processed_batch["input_ids"] = batch_text
-            processed_batch["token_level_labels"] = batch_token_labels
-            processed_batch["answer_masks"] = batch_ans_masks
-            processed_batch["token_2_bb_masks"] = batch_token_2_bb_masks
-        
-        elif mode == "eval":
-            batch_images, batch_text, batch_token_labels, batch_ans_masks = processor.get_processed_tokens_batch_inference(
-                [example["question"] for example in batch],
-                [example["image_path"] for example in batch],
-                [example["answer"] for example in batch],
-                [example["candidates"] for example in batch],
-                [example["hallucination_candidates"] for example in batch]
-            )
-
-            processed_batch["image_tensors"] = batch_images
-            processed_batch["input_ids"] = batch_text
-            processed_batch["token_level_labels"] = batch_token_labels
-            processed_batch["answer_masks"] = batch_ans_masks
-
-        if tokenizer is not None:
-            text_inputs = tokenizer(
-                [example["question"] for example in batch], padding=True, return_tensors="pt"
-            )
-            processed_batch["input_ids"] = text_inputs["input_ids"]
-            processed_batch["attention_mask"] = text_inputs["attention_mask"]
-
-        return processed_batch
-    
-    def gen_collate_fn(batch):
-        bkeys = ["question", "answer", "question_id", "image", "image_id", "image_path", "candidates", "img_token_imp_scores"]
-        processed_batch = {bkey: [example[bkey] for example in batch] for bkey in bkeys if bkey in batch[0]}
-
-    
-        batch_images, batch_text = processor.get_processed_tokens_batch_gen(
+        batch_image_tensor, batch_input_ids, batch_ans_masks =  processor.get_processed_tokens_batch(
             [example["question"] for example in batch],
-            [example["image_path"] for example in batch]
-            )
+            [example["image_path"] for example in batch],
+            [example["answer"] for example in batch],
+        )
 
-        processed_batch["image_tensors"] = batch_images
-        processed_batch["input_ids"] = batch_text
-        
+        processed_batch["image_tensors"] = batch_image_tensor
+        processed_batch["input_ids"] = batch_input_ids
+        processed_batch["answer_masks"] = batch_ans_masks
+
+    
         return processed_batch
     
-    if mode == "gen":
-        return gen_collate_fn
-    else:
-        return collate_fn
+    return collate_fn
         
 
 
@@ -692,11 +470,7 @@ class VQADataset(Dataset):
             "image_id": content["image_id"],
             "question": content["question"],
             "answer": content["answer"],
-            "question_id": content["question_id"],
-            "candidates": eval(content.get("candidates", '[]')),
-            "hallucination_candidates": eval(content.get("hallucination_candidates", '[]')),
-            "img_token_imp_scores": content.get("img_token_imp_scores", []),
-
+            "question_id": content["question_id"]
         }
         
         return data
@@ -711,38 +485,15 @@ class VQADataset(Dataset):
 
 def get_dataset(dataset_name: str):
     if dataset_name == "pope":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/pope/pope_total_test_9k.csv")
-        
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/pope_llava_old_res.csv")
         return df.to_dict("records")
     
     elif dataset_name == "chair":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_test_datasets/chair/chair_base_description_with_candidates.csv")
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_test_datasets/chair/chair_base_description.csv")
         return df.to_dict("records")
 
     elif dataset_name == "amber":
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/amber_test_data.csv")
         return df.to_dict("records")
     
-    
-    elif dataset_name == "holoc_total_train_gemini_labels":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/caption/gemini_labeled_28k.csv")
-        df_1 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/instruct/gemini_labeled_40k.csv")
-        df_2 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tp_data.csv")
-        df_3 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tn_data.csv")
-        total_df = pd.concat([df, df_1, df_2, df_3])
-        total_df = total_df.sample(frac=1)
-        return total_df.to_dict("records")
-
-    elif dataset_name == "coco_evidence_head_train":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/coco_long_captions/downscaled_total_coco_evidence_head_train_data_15k.csv")
-        return df.to_dict("records")
-    
-    elif dataset_name == "total_evidence_head_train":
-        coco_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/coco_long_captions/downscaled_total_coco_evidence_head_train_data_15k.csv")
-        haloc_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/holoc/downscaled_total_holoc_evidence_head_train_data_60k.csv")
-        flicker_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/flicker/downscaled_total_flickr_evidence_head_train_data_30k.csv")
-        finecops_ref = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/evidence_head_train_datasets/finecops_ref/downscaled_total_finecops_ref_evidence_head_train_data_30k.csv")
-        total_df = pd.concat([coco_df, haloc_df, flicker_df, finecops_ref])
-        total_df = total_df.sample(frac=1)
-        return total_df.to_dict("records")
 

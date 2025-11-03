@@ -242,4 +242,3 @@ def build_importance(M, do_smoothing: bool = False,
         # w = (w - w.mean()) / (w.std()+1e-6); w = torch.sigmoid(w)
     b = weights_to_bias(w, beta=beta, clip=clip)
     return w, b
-

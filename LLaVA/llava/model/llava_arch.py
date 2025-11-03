@@ -195,6 +195,12 @@ def aggregate_patch_blocks(x: torch.Tensor,
     return out
 
 
+def gate_visual_embeddings(x_vis, w, gamma=0.95):
+    # residual-preserving gate: x' = x*(1-γ) + x*(γ*w_i)
+    s = (1 - gamma) + gamma * w.unsqueeze(-1)
+    return x_vis * s
+
+
 class LlavaMetaForCausalLM(ABC):
 
     @abstractmethod
@@ -207,14 +213,14 @@ class LlavaMetaForCausalLM(ABC):
     def encode_images(self, images):
         image_features_vd = self.get_model().get_vision_tower()(images)
         image_features = self.get_model().mm_projector(image_features_vd)
-        image_features_vd_des = aggregate_patch_blocks(image_features_vd, img_size = images.shape[-1], patch_size = 14, blocks_per_side = 4)
-        image_des_features = self.get_model().mm_des_projector(image_features_vd_des)
-        combined = torch.cat([image_features, image_des_features], dim=1)
+        # image_features_vd_des = aggregate_patch_blocks(image_features_vd, img_size = images.shape[-1], patch_size = 14, blocks_per_side = 4)
+        # image_des_features = self.get_model().mm_des_projector(image_features_vd_des)
+        # combined = torch.cat([image_features, image_des_features], dim=1)
         return image_features
 
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images, image_sizes=None
+        images, image_sizes=None, img_token_weights = None
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
@@ -225,6 +231,7 @@ class LlavaMetaForCausalLM(ABC):
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
             concat_images = torch.cat([image for image in images], dim=0)
             image_features = self.encode_images(concat_images)
+            
             split_sizes = [image.shape[0] for image in images]
             image_features = torch.split(image_features, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
@@ -270,6 +277,8 @@ class LlavaMetaForCausalLM(ABC):
                 raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
             image_features = self.encode_images(images)
+            if img_token_weights != None:
+                image_features = gate_visual_embeddings(image_features, img_token_weights.to(image_features.device, dtype=image_features.dtype), gamma=0.8)
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):

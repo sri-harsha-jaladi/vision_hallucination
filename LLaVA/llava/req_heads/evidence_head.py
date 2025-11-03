@@ -187,14 +187,59 @@ class SingleHeadQueryAwareScorer(nn.Module):
 
 
 
-def aggregate_importance(M, r=None, eps=1e-6, temp=1.0):
-    # M are probabilities in [0,1]
-    if r is None:
-        r = M.new_ones(M.size(0))
+# --- helpers (reuse your own if you already defined them) ---
+def aggregate_importance(M, r=None, eps=1e-6, temp=0.8):
+    # M: [B, N] in [0,1]
+    if r is None: r = M.new_ones(M.size(0))
     r = r / (r.sum() + eps)
-    # reliability-weighted complement product: 1 - Π_b (1 - M_bi)^{r_b}
     log_comp = (r.unsqueeze(1) * torch.log1p(-M.clamp(0,1) + eps)).sum(dim=0)
-    w = 1.0 - torch.exp(log_comp)                        # [N]
-    # temperature sharpen/soften
-    w = torch.sigmoid((torch.logit(w.clamp(eps,1-eps)))/temp)
+    w = 1.0 - torch.exp(log_comp)                         # [N]
+    # optional temperature calibration
+    w = torch.sigmoid((torch.logit(w.clamp(1e-6,1-1e-6)))/temp)
     return w
+
+def smooth_and_sparsify(w, H=24, W=24, sigma=1.0, keep_ratio=0.25, floor=0.05):
+    # gaussian smooth on 24x24 then soft top-k style sparsify
+    k = int(2*round(2.5*sigma)+1)
+    g = torch.arange(k, device=w.device) - k//2
+    gauss1d = torch.exp(-(g**2)/(2*sigma**2)); gauss1d /= gauss1d.sum()
+    G = (gauss1d[:,None] @ gauss1d[None,:]).view(1,1,k,k)
+
+    Wmap = w.view(1,1,H,W)
+    pad = (k//2,)*4
+    Wmap = torch.nn.functional.conv2d(torch.nn.functional.pad(Wmap, pad, mode='replicate'), G)
+    w_sm = Wmap.view(-1)
+
+    k_keep = max(1, int(keep_ratio * w_sm.numel()))
+    tau = 0.25
+    scores = (w_sm - w_sm.topk(k_keep).values.min()).clamp_min(0)
+    w_sp = torch.softmax(scores/tau, dim=0)
+
+    w_final = floor + (1 - floor) * (w_sp / w_sp.max().clamp_min(1e-6))
+    return w_final.clamp(0,1)
+
+def weights_to_bias(w, beta=2.0, clip=6.0):
+    return (beta * torch.logit(w.clamp(1e-5, 1-1e-5))).clamp(-clip, clip)
+
+
+def agg_max(M):
+    # Hard union: per-token max over words
+    return M.max(dim=0).values  # [N]
+
+# --- toggleable builder ---
+def build_importance(M, do_smoothing: bool = False,
+                     H=24, W=24, sigma=1.0, keep_ratio=0.25,
+                     temp=0.8, beta=2.0, clip=6.0):
+    """M: [B, N] probs in [0,1] -> (w, b)"""
+    # w = aggregate_importance(M, temp=temp)                # [N]
+    w = agg_max(M)
+    if do_smoothing:
+        w = smooth_and_sparsify(w, H=H, W=W, sigma=sigma, keep_ratio=keep_ratio)
+    else:
+        # simple safety: clamp + mild normalization so scales are comparable
+        w = w.clamp(0,1)
+        # optional: renormalize to similar mean as smoothed run
+        # w = (w - w.mean()) / (w.std()+1e-6); w = torch.sigmoid(w)
+    b = weights_to_bias(w, beta=beta, clip=clip)
+    return w, b
+

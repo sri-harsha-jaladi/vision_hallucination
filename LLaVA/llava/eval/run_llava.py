@@ -246,7 +246,7 @@ def train_batch_model(args):
             "lr_24": optimizer_detection_head_24.param_groups[0]["lr"]
         })
         step += 1
-        if step in [500,1000,1500,2000, 2500]:
+        if step in [500,1000,1500,2000, 2250, 2500]:
             torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_{step}_03_11_2024.bin")
         
     torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_03_11_2024.bin")

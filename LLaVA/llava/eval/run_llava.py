@@ -568,12 +568,12 @@ def eval_batch_model(args):
     single_head_24.load_state_dict(evidence_head_24_weights)
     
     # detection head loading
-    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_1000_03_11_2024.bin", map_location='cuda')
+    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_03_11_2024.bin", map_location='cuda')
     detection_head_24 = HaluDetectionHead24().cuda()
     detection_head_24.load_state_dict(detection_head_24_weights)
     
 
-    dataset_name="pope"
+    dataset_name="amber"
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=False)
 
@@ -623,7 +623,10 @@ def eval_batch_model(args):
 
     elif dataset_name == "pope":
         total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/pope_llava_label_with_evidence_des_01_11_2025.pkl")
-        
+    
+    elif dataset_name == "amber":
+        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/amber_llava_label_with_evidence_des_04_11_2025.pkl")
+
 
 
 if __name__ == "__main__":

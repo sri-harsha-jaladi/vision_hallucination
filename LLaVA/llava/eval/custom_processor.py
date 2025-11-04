@@ -493,7 +493,7 @@ def get_dataset(dataset_name: str):
         return df.to_dict("records")
 
     elif dataset_name == "amber":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/amber_test_data.csv")
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/amber_llava_base_des.csv")
         return df.to_dict("records")
     
 

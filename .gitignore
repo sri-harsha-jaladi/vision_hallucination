@@ -12,3 +12,5 @@ haloc/
 head_checkpoints/
 large_image_datasets/
 visual_genome/
+total_flow_testing_results/
+evidence_head_test_datasets/

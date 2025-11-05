@@ -105,7 +105,7 @@ def batch_eval_model(args):
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
 
-    dataset_name="pope"
+    dataset_name="mme"
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=32, batch_size=32)
 
@@ -127,7 +127,9 @@ def batch_eval_model(args):
     if dataset_name == "chair":
         result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/chair_llava_base_des_02_11_2025.jsonl", lines=True, orient="records")
     elif dataset_name == "pope":
-        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/pope_llava_base_des_02_11_2025.jsonl", lines=True, orient="records")
+        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/testing_res/pope_llava_base_des_05_11_2025.jsonl", lines=True, orient="records")
+    elif dataset_name == "mme":
+        result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/mme/mme_base_des_05_11_2025.jsonl", lines=True, orient="records")
     elif dataset_name == "amber":
         req_df = result_df[["question_id", "generated_captions"]]
         req_df.columns = ["id", "response"]

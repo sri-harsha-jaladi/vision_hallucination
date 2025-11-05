@@ -216,3 +216,6 @@ def get_dataset(dataset_name: str):
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/amber_test_data.csv")
         return df.to_dict("records")
     
+    elif dataset_name == "mme":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/mme/mme_total.csv")
+        return df.to_dict("records")

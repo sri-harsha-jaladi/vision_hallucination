@@ -25,7 +25,8 @@ from llava.eval.custom_processor import LlaVaProcessor, collate_fn_builder, _ini
 from llava.conversation import SeparatorStyle, conv_templates
 from llava.mm_utils import KeywordsStoppingCriteria
 
-from llava.req_heads.halu_detection import HaluDetectionHead30, HaluDetectionHead24
+from llava.req_heads.halu_detection import EvidenceConditionedHallucinationDetector, HaluDetectionHead24
+from llava.req_heads.evidence_head import SingleHeadQueryAwareScorer
 
 from PIL import Image
 from uuid import uuid4
@@ -117,45 +118,34 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
         expanded_input_ids = torch.stack(expanded_input_ids).cpu()
         expanded_token_level_labels = torch.stack(expanded_token_level_labels).cpu()
         expanded_ans_masks = torch.stack(expanded_ans_masks).cpu()
-
-        target_hl_30_embds = [h[m.bool()] for h, m in zip(hidden_layers[30], expanded_ans_masks)]
-        target_hl_24_embds = [h[m.bool()] for h, m in zip(hidden_layers[24], expanded_ans_masks)]
-        target_labels = [h[m.bool()] for h, m in zip(expanded_token_level_labels, expanded_ans_masks)]
-        response_ids = [h[m.bool()] for h, m in zip(expanded_input_ids, expanded_ans_masks)]
-
-        if mode == "train":
-            flatern_hl_30_embds = torch.stack([j for i in target_hl_30_embds for j in i]).detach().clone().float().cuda()
-            flatern_hl_24_embds = torch.stack([j for i in target_hl_24_embds for j in i]).detach().clone().float().cuda()
-            flatern_target_labels = torch.stack([j for i in target_labels for j in i]).detach().clone().long().cuda()
-
-            flatern_hl_30_embds.requires_grad_(False)
-            flatern_hl_24_embds.requires_grad_(False)
-            flatern_target_labels.requires_grad_(False)
-            
-            del (
-                input_ids,
-                output_ids,
-                attention_mask,
-                image_tensor,
-                ans_masks,
-                expanded_input_ids,
-                expanded_token_level_labels,
-                expanded_ans_masks,
-                target_hl_30_embds,
-                target_hl_24_embds,
-                target_labels,
-            )
-            torch.cuda.empty_cache()
-            
-            return flatern_hl_30_embds, flatern_hl_24_embds, flatern_target_labels
         
-        elif mode == "eval":
-            target_hl_30_embds = [i.detach().clone().float().cuda() for i in  target_hl_30_embds]
-            target_hl_24_embds = [i.detach().clone().float().cuda() for i in  target_hl_24_embds]
-            target_labels = [i.detach().clone().long().cuda() for i in  target_labels]
-            response_ids = [i.detach().clone().long().cuda() for i in  response_ids]
+        ans_only_token_level_labels =  torch.stack([h*m for h, m in zip(expanded_token_level_labels, expanded_ans_masks)])
+        
 
-            return target_hl_30_embds, target_hl_24_embds, target_labels, response_ids
+        target_hl_30_embds = [(h[m != 0]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], ans_only_token_level_labels)]
+        target_hl_24_embds = [(h[m != 0]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], ans_only_token_level_labels)]
+        target_labels = [(h[m != 0]).detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_token_level_labels, ans_only_token_level_labels)]
+        response_ids = [h[m != 0] for h, m in zip(expanded_input_ids, ans_only_token_level_labels)]
+
+        image_tokens_h1_30_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], expanded_input_ids)]
+        image_tokens_h1_24_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], expanded_input_ids)]
+        
+            
+        del (
+            input_ids,
+            output_ids,
+            attention_mask,
+            image_tensor,
+            ans_masks,
+            expanded_input_ids,
+            expanded_token_level_labels,
+            expanded_ans_masks,
+        )
+        torch.cuda.empty_cache()
+            
+        
+
+        return target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds
 
 
 def train_batch_model(args):
@@ -193,12 +183,18 @@ def train_batch_model(args):
     model.config.tokenizer_padding_side = tokenizer.padding_side = "left"
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
+    # evidence head loading
+    evidence_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/evidence/single_head_strict_train_24l_01_11_2024_d_4096.bin", map_location='cuda')
+    evidence_head_24 = SingleHeadQueryAwareScorer(d = 4096, d_k = 512, mlp_hidden = 512).cuda()
+    evidence_head_24.load_state_dict(evidence_head_24_weights)
+
 
     dataset_name="holoc_total_train_gemini_labels"
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=True)
     
-    detection_head_24 = HaluDetectionHead24().cuda()
+    detection_head_24 = EvidenceConditionedHallucinationDetector(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
+    # detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 1024, hidden_dim2 = 512).cuda()
     
     optimizer_detection_head_24 = AdamW(detection_head_24.parameters(), lr=1e-3, weight_decay=1e-4, betas=(0.9, 0.999))
     
@@ -220,36 +216,45 @@ def train_batch_model(args):
         print("just init 24:", any(torch.isnan(p).any() for p in detection_head_24.parameters()))
     
     sched_optimizer_detection_head_24 = LambdaLR(optimizer_detection_head_24, lr_lambda)
-    criterion = nn.CrossEntropyLoss()
-
 
     step = 0
+    detection_head_24.train()
     for batch in tqdm(dataloader, desc=f"step: training detection head"):
-        class_mapping  = {-1:0, 0:1, 1:2}
-        flatern_hl_30_embds, flatern_hl_24_embds, flatern_target_labels = generate_llava(batch, tokenizer, model, processor)
+        target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds = generate_llava(batch, tokenizer, model, processor)
         
-        labels_mapped = torch.where(flatern_target_labels == -1, 0, torch.where(flatern_target_labels == 0, 1, 2))
-        detection_head_24.train()
-
         optimizer_detection_head_24.zero_grad(set_to_none=True)
-        logits_24 = detection_head_24(flatern_hl_24_embds)
-        loss_24 = criterion(logits_24, labels_mapped)
-        loss_24.backward()
         
+        losses_24 = []
+        for hl_30_embd, hl_24_embd, target_label, img_token_h1_30_embd, img_token_h1_24_embd in \
+                zip(target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds):
+            
+            with torch.no_grad():
+                ev_logits, _= evidence_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd)
+            
+            labels_mapped = (target_label == 1).float()
+            logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens = hl_24_embd, evidence_logits=ev_logits, labels=labels_mapped)
+            # logits, loss = detection_head_24(x=hl_24_embd, labels=labels_mapped)
+            losses_24.append(loss)
+            
+        batch_loss_24 = torch.stack(losses_24).mean()
+        batch_loss_24.backward()
+
+        torch.nn.utils.clip_grad_norm_(list(detection_head_24.parameters()), max_norm=1.0)
+
         optimizer_detection_head_24.step()
         sched_optimizer_detection_head_24.step()
 
-        print(f"24 Avg loss: {loss_24.item():.4f}")
+        print(f"24 Avg loss: {batch_loss_24.item():.4f}")
         wandb.log({
             "step": step,
-            "avg_loss_24": loss_24.item(),
+            "avg_loss_24": batch_loss_24.item(),
             "lr_24": optimizer_detection_head_24.param_groups[0]["lr"]
         })
         step += 1
         if step in [500,1000,1500,2000, 2250, 2500]:
-            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_{step}_03_11_2024.bin")
-        
-    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_03_11_2024.bin")
+            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_attn_detection_head_24hl_{step}_04_11_2024.bin")
+
+    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_attn_detection_head_24hl_03_11_2024.bin")
 
     torch.cuda.empty_cache()
     

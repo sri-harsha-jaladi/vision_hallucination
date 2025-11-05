@@ -105,9 +105,9 @@ def batch_eval_model(args):
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
 
-    dataset_name="mme"
+    dataset_name="train"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=32, batch_size=32)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=16, batch_size=16)
 
     all_generated_captions = []
     question_ids = []
@@ -135,6 +135,9 @@ def batch_eval_model(args):
         req_df.columns = ["id", "response"]
         req_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_llava_base_des_02_11_2025.json", lines=True, orient="records")
         result_df.to_json("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/amber/llava_res/amber_llava_base_des_all_res_02_11_2025.json", lines=True, orient="records")
+    
+    elif dataset_name == "train":
+        result_df.to_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/vga_gqa_base_model_res.csv", index=False)
 
 
 def eval_model(args):

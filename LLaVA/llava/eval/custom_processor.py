@@ -219,3 +219,11 @@ def get_dataset(dataset_name: str):
     elif dataset_name == "mme":
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/benchmarks/mme/mme_total.csv")
         return df.to_dict("records")
+    
+    elif dataset_name == "train":
+        gqa_train_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/gqa/gqa_unlabeled_15k_data.csv")
+        gqa_train_df["data_type"] = "gqa"
+        vga_train_df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/vga/vga_unlabeled_data_10k.csv")
+        vga_train_df["data_type"] = "vga"
+        total_df = pd.concat([gqa_train_df, vga_train_df])
+        return total_df.to_dict("records")

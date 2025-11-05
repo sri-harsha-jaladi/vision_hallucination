@@ -414,7 +414,7 @@ class LlaVaProcessor:
 def collate_fn_builder(processor=None, tokenizer=None , mode = "gen"):
     
     def collate_fn(batch):
-        bkeys = ["question", "answer", "question_id", "image", "image_id", "image_path"]
+        bkeys = ["question", "answer", "question_id", "image", "image_id", "image_path", "gt_answer", "data_type"]
         processed_batch = {bkey: [example[bkey] for example in batch] for bkey in bkeys if bkey in batch[0]}
 
         
@@ -470,7 +470,9 @@ class VQADataset(Dataset):
             "image_id": content["image_id"],
             "question": content["question"],
             "answer": content["answer"],
-            "question_id": content["question_id"]
+            "question_id": content["question_id"],
+            "gt_answer": content.get("gt_answer", None),
+            "data_type": content.get("data_type", "no_datatype"),
         }
         
         return data
@@ -485,7 +487,11 @@ class VQADataset(Dataset):
 
 def get_dataset(dataset_name: str):
     if dataset_name == "pope":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/pope_llava_old_res.csv")
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/pope_base_des_05_11_2025.csv")
+        return df.to_dict("records")
+    
+    elif dataset_name == "mme":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/mme/mme_base_des_05_11_2025.csv")
         return df.to_dict("records")
     
     elif dataset_name == "chair":

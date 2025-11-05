@@ -60,135 +60,6 @@ def load_images(image_files):
         out.append(image)
     return out
 
-# def model_infer_4_generation(batch, tokenizer, model, processor, max_length=128, do_sample=True, num_return_sequences=3):
-
-#         conv = conv_templates[processor.conv_mode].copy()
-#         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-#         keywords = [stop_str]
-#         stopping_criteria = (
-#             [KeywordsStoppingCriteria(keywords, processor.tokenizer, input_ids)] if conv.version == "v0" else None
-#         )
-#         input_ids = batch["input_ids"]
-#         image_tensor = batch["image_tensors"]
-#         img_token_imp_scores = torch.tensor(np.stack(batch["img_token_imp_scores"]))
-        
-#         input_ids = input_ids.cuda()
-
-#         output_ids = model.generate(
-#             input_ids,
-#             images=image_tensor.half().cuda(),
-#             do_sample=True if args.temperature > 0 else False,
-#             temperature=args.temperature,
-#             top_p=args.top_p,
-#             num_beams=args.num_beams,
-#             max_new_tokens=args.max_new_tokens,
-#             use_cache=True,
-#             stopping_criteria=stopping_criteria,
-#             img_token_weights =img_token_imp_scores
-#         )
-#         generated_outputs = processor.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-#         generated_outputs = [out.strip() for out in generated_outputs]
-#         generated_outputs = [out[: -len(stop_str)] if out.endswith(stop_str) else out for out in generated_outputs]
-
-#         return generated_outputs
-    
-    
-
-
-
-# def generate_llava(batch, tokenizer, model, processor, mode = "train", max_length=128, do_sample=True, num_return_sequences=3):
-
-#         conv = conv_templates[processor.conv_mode].copy()
-#         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-#         keywords = [stop_str]
-#         stopping_criteria = (
-#             [KeywordsStoppingCriteria(keywords, processor.tokenizer, input_ids)] if conv.version == "v0" else None
-#         )
-#         input_ids = batch["input_ids"]
-#         image_tensor = batch["image_tensors"]
-#         input_ids = input_ids.cuda()
-#         token_level_labels = batch["token_level_labels"].cuda()
-#         ans_masks = batch["answer_masks"].cuda()
-#         token_2_bb_masks = batch["token_2_bb_masks"].cuda()
-        
-#         attention_mask = (input_ids != tokenizer.pad_token_id).int()
-        
-#         hidden_layers = {}
-#         def save_hook(layer_id):
-#             def fn(module, input, output):
-#                 # Detach and move to CPU to avoid GPU memory blowup
-#                 hidden_layers[layer_id] = output[0].detach().cpu()
-#             return fn
-        
-#         layers_to_hook = [24, 30]
-        
-#         handles = []
-#         for i, layer in enumerate(model.model.layers):
-#             if i in layers_to_hook:
-#                 handle = layer.register_forward_hook(save_hook(i))
-#                 handles.append(handle)
-        
-#         with torch.inference_mode():
-#             output_ids = model.forward(
-#                 input_ids=input_ids,
-#                 attention_mask = attention_mask,
-#                 images=image_tensor.half().cuda(),
-#                 use_cache=False)
-        
-#         for h in handles:
-#             h.remove()
-            
-
-#         expanded_input_ids = []
-#         expanded_token_level_labels = []
-#         expanded_ans_masks = []
-#         expanded_token_2_bb_masks = []
-#         img_token_position = []
-#         for input_id, token_level_labels, ans_mask, token_2_bb_mask in zip(input_ids, token_level_labels, ans_masks, token_2_bb_masks):
-            
-#             img_token_position = torch.where(input_id==-200)[0].tolist()[0]
-#             expanded_input_ids.append(torch.cat((input_id[:img_token_position], torch.full((575,), -200, device=input_id.device), input_id[img_token_position:])))
-#             expanded_token_level_labels.append(torch.cat((token_level_labels[:img_token_position], torch.full((575,), 0, device=token_level_labels.device), token_level_labels[img_token_position:])))
-#             expanded_ans_masks.append(torch.cat((ans_mask[:img_token_position], torch.full((575,), 0, device=ans_mask.device), ans_mask[img_token_position:])))
-#             expanded_token_2_bb_masks.append(torch.cat((token_2_bb_mask[:img_token_position], torch.full((575, 576), 0, device=token_2_bb_mask.device), token_2_bb_mask[img_token_position:])))
-        
-#         expanded_input_ids = torch.stack(expanded_input_ids).cpu()
-#         expanded_token_level_labels = torch.stack(expanded_token_level_labels).cpu()
-#         expanded_ans_masks = torch.stack(expanded_ans_masks).cpu()
-#         expanded_token_2_bb_masks = torch.stack(expanded_token_2_bb_masks).cpu()
-
-#         ans_only_token_level_labels =  torch.stack([h*m for h, m in zip(expanded_token_level_labels, expanded_ans_masks)])
-
-#         target_hl_30_embds = [(h[m.bool()]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], ans_only_token_level_labels)]
-#         target_hl_24_embds = [(h[m.bool()]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], ans_only_token_level_labels)]
-#         target_token_2_bb_masks = [(h[m.bool()]).detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_token_2_bb_masks, ans_only_token_level_labels)]
-#         response_ids = [(h[m.bool()]).detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_input_ids, ans_only_token_level_labels)]
-
-#         image_tokens_h1_30_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], expanded_input_ids)]
-#         image_tokens_h1_24_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], expanded_input_ids)]
-
-#         if mode == "train":
-#             del (
-#                 input_ids,
-#                 output_ids,
-#                 attention_mask,
-#                 image_tensor,
-#                 ans_masks,
-#                 expanded_input_ids,
-#                 expanded_token_level_labels,
-#                 expanded_ans_masks,
-#                 expanded_token_2_bb_masks,
-#                 ans_only_token_level_labels,
-#                 # target_hl_30_embds,
-#                 # target_hl_24_embds,
-#                 # target_labels,
-#                 # target_token_2_bb_masks
-                
-#             )
-#             torch.cuda.empty_cache()
-
-#             return target_hl_30_embds, target_hl_24_embds, target_token_2_bb_masks, image_tokens_h1_30_embds, image_tokens_h1_24_embds
-
 def llava_forward_halu_detect(batch, tokenizer, model, processor, max_length=128, do_sample=True, num_return_sequences=3):
 
         conv = conv_templates[processor.conv_mode].copy()
@@ -393,9 +264,9 @@ def eval_batch_model(args):
     detection_head_24.load_state_dict(detection_head_24_weights)
     
 
-    dataset_name="chair"
+    dataset_name="mme"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=16, batch_size=16, shuffle=False)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=False)
 
     
     single_head_24.eval()
@@ -403,7 +274,7 @@ def eval_batch_model(args):
     detection_head_24.eval()
 
     all_dfs = []
-    target_columns = ['question', 'answer', 'question_id', 'image_id', 'image_path']
+    target_columns = ['question', 'answer', 'question_id', 'image_id', 'image_path',  "gt_answer", "data_type"]
     for batch in tqdm(dataloader, desc="storing embds"):
         target_hl_24_embds, response_ids, image_tokens_h1_24_embds = llava_forward_halu_detect(batch, tokenizer, model, processor)
 
@@ -453,6 +324,9 @@ def eval_batch_model(args):
     elif dataset_name == "pope":
         total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/pope_llava_label_with_evidence_and_attn_detection_05_11_2025.pkl")
     
+    elif dataset_name == "mme":
+        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/mme/mme_llava_label_with_evidence_and_attn_detection_05_11_2025.pkl")
+
     elif dataset_name == "amber":
         total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/amber_llava_label_with_evidence_and_attn_detection_05_11_2025.pkl")
 

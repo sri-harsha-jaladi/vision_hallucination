@@ -193,8 +193,8 @@ def train_batch_model(args):
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=True)
     
-    # detection_head_24 = EvidenceConditionedHallucinationDetector(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
-    detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
+    detection_head_24 = EvidenceConditionedHallucinationDetector(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
+    # detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
     
     optimizer_detection_head_24 = AdamW(detection_head_24.parameters(), lr=1e-3, weight_decay=1e-4, betas=(0.9, 0.999))
     
@@ -228,12 +228,12 @@ def train_batch_model(args):
         for hl_30_embd, hl_24_embd, target_label, img_token_h1_30_embd, img_token_h1_24_embd in \
                 zip(target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds):
             
-            # with torch.no_grad():
-            #     ev_logits, _= evidence_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd)
+            with torch.no_grad():
+                ev_logits, _= evidence_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd)
             
             labels_mapped = (target_label == 1).float()
-            # logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens = hl_24_embd, evidence_logits=ev_logits, labels=labels_mapped)
-            logits, loss = detection_head_24(x=hl_24_embd, labels=labels_mapped)
+            logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens = hl_24_embd, evidence_logits=ev_logits, labels=labels_mapped)
+            # logits, loss = detection_head_24(x=hl_24_embd, labels=labels_mapped)
             losses_24.append(loss)
             
         batch_loss_24 = torch.stack(losses_24).mean()

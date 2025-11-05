@@ -8,9 +8,9 @@ from google.oauth2.service_account import Credentials
 # ================== CONFIG ==================
 SERVICE_ACCOUNT_FILE = "/Data2/Arun-UAV/NLP/new_cloud_coount.json"
 BUCKET_NAME = "train_data_vision_1"
-FOLDER_PATH = "/Data2/Arun-UAV/NLP/vision_halu/train_datasets/poc_5000_coco_images"
-PREFIX = "coco_batch_1_15000/"   # Optional subfolder in bucket
-MAX_WORKERS = 64                    # Tune to number of CPU cores
+FOLDER_PATH = "/Data2/Arun-UAV/NLP/vision_halu/visual_genome/VG_100K"
+PREFIX = "visual_genome_100k/"   # Optional subfolder in bucket
+MAX_WORKERS = 64                 # Tune to number of CPU cores
 # ============================================
 
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
@@ -57,7 +57,7 @@ def upload_images_to_gcs_parallel(folder_path: str) -> pd.DataFrame:
 # ---------- MAIN ----------
 if __name__ == "__main__":
     df = upload_images_to_gcs_parallel(FOLDER_PATH)
-    output_csv = "/Data2/Arun-UAV/NLP/vision_halu/train_datasets/coco_batch_1_15000_gcp_upload_urs.csv"
+    output_csv = "/Data2/Arun-UAV/NLP/vision_halu/visual_genome/visual_genome_100K_gcp_upload_urs.csv"
     df.to_csv(output_csv, index=False)
     print(f"✅ Upload complete — results saved to {output_csv}")
     

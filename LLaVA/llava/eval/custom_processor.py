@@ -388,11 +388,11 @@ def get_dataset(dataset_name: str):
     
     elif dataset_name == "holoc_total_train_gemini_labels":
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/caption/gemini_labeled_28k.csv")
-        df_1 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/instruct/gemini_labeled_40k.csv")
-        df_2 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tp_data.csv")
-        df_3 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tn_data.csv")
+        # df_1 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/instruct/gemini_labeled_40k.csv")
+        # df_2 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tp_data.csv")
+        # df_3 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tn_data.csv")
         coco_data = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/coco/gemini_labeld_15k.csv")
-        total_df = pd.concat([df, df_1, df_2, df_3, coco_data])
+        total_df = pd.concat([df, coco_data])
         total_df = total_df.drop(["candidates_inx", "hallucination_candidates_inx"], axis=1)
         total_df = total_df.sample(frac=1)
         return total_df.to_dict("records")

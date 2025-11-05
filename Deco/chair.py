@@ -327,6 +327,11 @@ class CHAIR(object):
         # :add:
         num_recall_gt_objects = 0.
         num_gt_objects = 0.
+        
+         # --- ADD FOR F1 (dataset-level totals) ---
+        total_tp = 0
+        total_fp = 0
+        total_fn = 0
 
         output = {'sentences': []} 
         
@@ -348,11 +353,25 @@ class CHAIR(object):
                         'hallucination_idxs': [], 
                         'words': raw_words 
                         }
+            
+             # --- ADD FOR F1 (set-based objects) ---
+            pred_set = set(node_words)            # predicted objects (unique)
+            gt_set = set(gt_objects)              # ground-truth objects (unique)
+            tp = len(pred_set & gt_set)
+            fp = len(pred_set - gt_set)
+            fn = len(gt_set - pred_set)
+
+            total_tp += tp
+            total_fp += fp
+            total_fn += fn
+            # --- END ADD ---
 
             # :add:
             cap_dict['metrics'] = {'CHAIRs': 0,
                                    'CHAIRi': 0,
-                                   'Recall': 0,
+                                   'Recall': 0,      # recall over gt_set (same meaning as before)
+                                   'Precision': 0,   # --- ADD FOR F1 ---
+                                   'F1': 0,          # --- ADD FOR F1 ---
                                    'Len': 0,
                                    }
  
@@ -393,6 +412,16 @@ class CHAIR(object):
             # add
             if len(gt_objects) > 0:
                 cap_dict['metrics']['Recall'] = len(recall_gt_objects) / len(gt_objects)
+            
+             # --- ADD FOR F1 (per-caption precision & F1) ---
+            if len(pred_set) > 0:
+                cap_dict['metrics']['Precision'] = tp / len(pred_set)
+            # prefer the same recall definition used above for consistency:
+            prec = cap_dict['metrics']['Precision']
+            rec = cap_dict['metrics']['Recall']
+            if (prec + rec) > 0:
+                cap_dict['metrics']['F1'] = 2 * prec * rec / (prec + rec)
+            # --- END ADD ---
    
             output['sentences'].append(cap_dict)
  
@@ -401,10 +430,18 @@ class CHAIR(object):
         # add
         recall = num_recall_gt_objects / num_gt_objects
         avg_len = (0.01*len_caps/num_caps)
+        
+        
+        overall_precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+        overall_recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+        overall_f1 = (2 * overall_precision * overall_recall / (overall_precision + overall_recall)) \
+                     if (overall_precision + overall_recall) > 0 else 0.0
     
         output['overall_metrics'] = {'CHAIRs': chair_s,
                                      'CHAIRi': chair_i,
-                                     'Recall': recall,
+                                     'Precision': overall_precision,  # --- ADD FOR F1 ---
+                                     'Recall': overall_recall,        # (kept; aligns with F1 recall)
+                                     'F1': overall_f1,                # --- ADD FOR F1 ---
                                      'Len': avg_len,}
     
         return output 

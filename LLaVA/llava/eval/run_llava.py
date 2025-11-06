@@ -318,17 +318,20 @@ def eval_batch_model(args):
         all_dfs.append(df)
 
     total_df = pd.concat(all_dfs)
+    arc = "mlp"
+    date = "06_11_2025"
+    train_type= "2_stage"
     if dataset_name == "chair":
-        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/chair/base_des_label_with_evidence_and_attn_detection_05_11_2025.pkl")
+        total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/chair/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
     elif dataset_name == "pope":
-        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/pope_llava_label_with_evidence_and_attn_detection_05_11_2025.pkl")
-    
+        total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/pope/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
+
     elif dataset_name == "mme":
-        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/mme/mme_llava_label_with_evidence_and_attn_detection_05_11_2025.pkl")
+        total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/mme/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
     elif dataset_name == "amber":
-        total_df.to_pickle("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/amber_llava_label_with_evidence_and_attn_detection_05_11_2025.pkl")
+        total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
 
 

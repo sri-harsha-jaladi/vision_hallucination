@@ -398,7 +398,9 @@ def get_dataset(dataset_name: str):
         visual_genome_large = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/vga/large_vga_gemini_labeled.csv")
 
 
-        total_df = pd.concat([instruct, gqa_small, visual_genome_small])
+        # total_df = pd.concat([instruct, gqa_small, visual_genome_small])
+        total_df = pd.concat([caption, coco_data, gqa_large, visual_genome_large])
+        
         total_df = total_df.sample(frac=1)
         return total_df.to_dict("records")
 

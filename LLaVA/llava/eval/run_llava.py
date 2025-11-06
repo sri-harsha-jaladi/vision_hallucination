@@ -199,8 +199,9 @@ def train_batch_model(args):
     # detection_head_24 = SingleHeadDetectionClassifier(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
     # detection_head_24.load_state_dict(detection_head_24_weights)
     
+    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/short_mlp_06_11_2024.bin", map_location='cuda')
     detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
-    
+    detection_head_24.load_state_dict(detection_head_24_weights)
     
     
     
@@ -265,9 +266,9 @@ def train_batch_model(args):
         })
         step += 1
         if step in [500,1000,1500,2000, 2250, 2500]:
-            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/short_mlp_{step}_06_11_2024.bin")
+            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/large_mlp_{step}_06_11_2024.bin")
 
-    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/short_mlp_06_11_2024.bin")
+    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/large_mlp_06_11_2024.bin")
 
     torch.cuda.empty_cache()
     

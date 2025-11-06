@@ -115,6 +115,126 @@ class HaluDetectionHead24(nn.Module):
 
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Optional, Tuple
+
+class SingleHeadDetectionClassifier(nn.Module):
+    """
+    Attention -> Single MLP head for per-target-token hallucination classification.
+
+    Inputs:
+      img_tokens:  [N, D]        (image patch tokens, shared across the batch)
+      text_tokens: [B, D]        (one target text token per item)
+      labels:     [B] or [B,1]   (optional, 0/1; 1 = hallucinated)
+
+    Returns:
+      logits:     [B]            (per-token hallucination logit; >0 => hallucinated)
+      loss:       scalar or None
+    """
+    def __init__(
+        self,
+        d: int,
+        d_k: int = 1024,
+        mlp_hidden: int = 1024,
+        dropout: float = 0.1,
+        attn_temp: float = 1.0,   # temperature on attention logits (1.0 = none)
+    ):
+        super().__init__()
+        # Pre-norms
+        self.ln_q  = nn.LayerNorm(d)
+        self.ln_kv = nn.LayerNorm(d)
+
+        # Projections
+        self.W_q = nn.Linear(d, d_k, bias=False)
+        self.W_k = nn.Linear(d, d_k, bias=False)
+        self.W_v = nn.Linear(d, d_k, bias=False)
+
+        self.scale   = d_k ** 0.5
+        self.dropout = nn.Dropout(dropout)
+        self.attn_temp = attn_temp
+
+        # Single classification head over compact features
+        # Feature vector: [q, ctx, q⊙ctx, |q-ctx|, sim_mean, sim_max, sim_lse]
+        # Size = 4*d_k + 3
+        feat_dim = 4 * d_k + 3
+        self.head = nn.Sequential(
+            nn.Linear(feat_dim, mlp_hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(mlp_hidden, 1)
+        )
+
+    def forward(
+        self,
+        img_tokens: torch.Tensor,            # [N, D]
+        text_tokens: torch.Tensor,           # [B, D]
+        labels: Optional[torch.Tensor] = None,  # [B] or [B,1]
+        pos_weight: Optional[torch.Tensor] = None,
+        reduction: str = "mean"
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        if img_tokens.dim() != 2 or text_tokens.dim() != 2:
+            raise ValueError(f"img_tokens [N,D], text_tokens [B,D], got {img_tokens.shape}, {text_tokens.shape}")
+
+        N, D = img_tokens.shape
+        B, Dt = text_tokens.shape
+        if Dt != D:
+            raise ValueError(f"Dim mismatch: D_img={D} vs D_txt={Dt}")
+
+        # Normalize + project
+        K = self.W_k(self.ln_kv(img_tokens))      # [N, d_k]
+        V = self.W_v(self.ln_kv(img_tokens))      # [N, d_k]
+        Q = self.W_q(self.ln_q(text_tokens))      # [B, d_k]
+
+        # Attention over ALL image patches (no top-k)
+        # sim[b, i] = (Q[b] · K[i]) / sqrt(d_k)
+        sim = (Q @ K.T) / self.scale              # [B, N]
+        if self.attn_temp is not None and self.attn_temp > 0:
+            sim = sim / self.attn_temp
+        sim = self.dropout(sim)
+
+        attn = F.softmax(sim, dim=1)              # [B, N]
+        # Context per target token
+        # ctx[b] = Σ_i attn[b,i] * V[i]
+        ctx = attn @ V                            # [B, d_k]
+
+        # Compose minimal, information-dense features
+        prod = Q * ctx                             # [B, d_k]
+        diff = (Q - ctx).abs()                     # [B, d_k]
+        sim_mean = sim.mean(dim=1, keepdim=True)   # [B,1]
+        sim_max  = sim.amax(dim=1, keepdim=True)   # [B,1]
+        sim_lse  = torch.logsumexp(sim, dim=1, keepdim=True)  # [B,1]
+
+        feats = torch.cat([Q, ctx, prod, diff, sim_mean, sim_max, sim_lse], dim=-1)  # [B, 4*d_k+3]
+
+        logits = self.head(feats).squeeze(-1)     # [B]
+        
+        # labels = labels.float()
+        # n_pos = labels.sum()
+        # n_neg = labels.numel() - n_pos
+
+        # if n_pos == 0 or n_neg == 0:
+        #     # fallback: uniform weights
+        #     weight = torch.ones_like(labels, dtype=torch.float32)
+        # else:
+        #     w_pos = n_neg / (n_pos + n_neg)
+        #     w_neg = n_pos / (n_pos + n_neg)
+        #     weight = torch.where(labels == 1, w_pos, w_neg)
+        
+
+        loss = None
+        if labels is not None:
+            labels = labels.view(-1).float()      # [B]
+            loss = F.binary_cross_entropy_with_logits(
+                logits, labels, reduction=reduction, pos_weight=pos_weight#, weight=weight 
+            )
+        return logits, loss
+
+    @torch.no_grad()
+    def predict_proba(self, img_tokens: torch.Tensor, text_tokens: torch.Tensor) -> torch.Tensor:
+        logits, _ = self.forward(img_tokens, text_tokens, labels=None)
+        return torch.sigmoid(logits)  # [B]
 
 class EvidenceConditionedHallucinationDetector(nn.Module):
     """
@@ -251,4 +371,6 @@ class EvidenceConditionedHallucinationDetector(nn.Module):
     @torch.no_grad()
     def predict_proba(self, img_tokens, text_tokens, evidence_logits):
         logits, _ = self.forward(img_tokens, text_tokens, evidence_logits, labels=None)
-        return torch.sigmoid(logits)  # [B]
+        return torch.sigmoid(logits)  # [B
+
+

@@ -387,13 +387,18 @@ def get_dataset(dataset_name: str):
     
     
     elif dataset_name == "holoc_total_train_gemini_labels":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/caption/gemini_labeled_28k.csv")
-        # df_1 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/instruct/gemini_labeled_40k.csv")
-        # df_2 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tp_data.csv")
-        # df_3 = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/haloc/haloc_extension/vqa/tn_data.csv")
+        # vqa = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/holoc/vqa/gemini_labeled_vqa_data_40k.csv")
+        instruct = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/holoc/instruct/gemini_labeled_instruct_data_20k.csv")
+        gqa_small = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/gqa/small_gqa_gemini_labeled.csv")
+        visual_genome_small = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/vga/small_vga_gemini_labeled.csv")
+        
+        caption = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/holoc/caption/gemini_labeled_caption_data_17k.csv")
         coco_data = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/coco/gemini_labeld_15k.csv")
-        total_df = pd.concat([df, coco_data])
-        total_df = total_df.drop(["candidates_inx", "hallucination_candidates_inx"], axis=1)
+        gqa_large = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/gqa/large_gqa_gemini_labeled.csv")
+        visual_genome_large = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/vga/large_vga_gemini_labeled.csv")
+
+
+        total_df = pd.concat([instruct, gqa_small, visual_genome_small])
         total_df = total_df.sample(frac=1)
         return total_df.to_dict("records")
 

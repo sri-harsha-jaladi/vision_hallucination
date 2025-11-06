@@ -259,12 +259,13 @@ def eval_batch_model(args):
     selection_head_24.load_state_dict(selection_head_24_weights)
     
     # detection head loading
-    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_attn_detection_head_24hl_03_11_2024.bin", map_location='cuda')
-    detection_head_24 = EvidenceConditionedHallucinationDetector(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
+    detection_model_type = "mlp"
+    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/large_mlp_06_11_2024.bin", map_location='cuda')
+    detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
     detection_head_24.load_state_dict(detection_head_24_weights)
     
 
-    dataset_name="mme"
+    dataset_name="pope"
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=False)
 
@@ -294,7 +295,10 @@ def eval_batch_model(args):
                 with torch.no_grad():
                     evidence_head_logits, _ = single_head_24(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_2_hl_24_embd)
                     evidence_head_probs = torch.sigmoid(evidence_head_logits)
-                    detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_2_hl_24_embd, evidence_logits=evidence_head_logits)
+                    if detection_model_type == "attn":
+                        detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_2_hl_24_embd, evidence_logits=evidence_head_logits)
+                    elif detection_model_type == "mlp":
+                        detection_head_probs = detection_head_probs.predict_proba(text_tokens=candidate_words_2_hl_24_embd)
 
                     for word, evidence, label_prob in zip(candidate_words_lbl_2, evidence_head_probs, detection_head_probs):
                         res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": label_prob.cpu().item()})
@@ -304,8 +308,11 @@ def eval_batch_model(args):
                 with torch.no_grad():
                     evidence_head_logits, _ = single_head_24(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_0_hl_24_embd)
                     evidence_head_probs = torch.sigmoid(evidence_head_logits)
-                    detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_0_hl_24_embd, evidence_logits=evidence_head_logits)
-
+                    if detection_model_type == "attn":
+                        detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_0_hl_24_embd, evidence_logits=evidence_head_logits)
+                    elif detection_model_type == "mlp":
+                        detection_head_probs = detection_head_24.predict_proba(text_tokens=candidate_words_0_hl_24_embd)
+                        
                     for word, evidence, label_prob in zip(candidate_words_lbl_0, evidence_head_probs, detection_head_probs):
                         res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": label_prob.cpu().item()})
 

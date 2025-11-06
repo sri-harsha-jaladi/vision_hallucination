@@ -245,6 +245,11 @@ def train_batch_model(args):
             losses_24.append(loss)
             
         batch_loss_24 = torch.stack(losses_24).mean()
+        
+        if torch.isnan(batch_loss_24):
+            print(f"NaN loss at step {step}, skipping batch")
+            continue
+        
         batch_loss_24.backward()
 
         torch.nn.utils.clip_grad_norm_(list(detection_head_24.parameters()), max_norm=1.0)

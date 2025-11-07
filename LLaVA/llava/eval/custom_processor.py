@@ -387,7 +387,6 @@ def get_dataset(dataset_name: str):
     
     
     elif dataset_name == "holoc_total_train_gemini_labels":
-        # vqa = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/holoc/vqa/gemini_labeled_vqa_data_40k.csv")
         instruct = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/holoc/instruct/gemini_labeled_instruct_data_20k.csv")
         gqa_small = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/gqa/small_gqa_gemini_labeled.csv")
         visual_genome_small = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/hal_detection_head_train_datasets/vga/small_vga_gemini_labeled.csv")

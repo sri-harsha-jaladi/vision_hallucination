@@ -254,20 +254,20 @@ def eval_batch_model(args):
     single_head_24.load_state_dict(evidence_head_24_weights)
     
     # candidate selection head loading
-    selection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/total_train_detection_head_24hl_03_11_2024.bin", map_location='cuda')
-    selection_head_24 = HaluDetectionHead24().cuda()
+    selection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/selector_mlp_06_11_2024.bin", map_location='cuda')
+    selection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
     selection_head_24.load_state_dict(selection_head_24_weights)
     
     # detection head loading
     detection_model_type = "mlp"
-    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/large_mlp_06_11_2024.bin", map_location='cuda')
+    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/combined_mlp_1000_06_11_2024.bin", map_location='cuda')
     detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
     detection_head_24.load_state_dict(detection_head_24_weights)
     
 
-    dataset_name="pope"
+    dataset_name="holoc"
     collate_fn = collate_fn_builder(processor, None)
-    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=64, batch_size=64, shuffle=False)
+    dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=32, batch_size=32, shuffle=False)
 
     
     single_head_24.eval()
@@ -281,40 +281,57 @@ def eval_batch_model(args):
 
         batch_res = []
         for hl_24_embd, response_id, image_tokens_hl_24_embd in zip(target_hl_24_embds, response_ids, image_tokens_h1_24_embds):
-            hal_pred, hal_probs = selection_head_24.predict(hl_24_embd)
-            candidate_words_lbl_2 = words_with_label(tokenizer, input_ids=response_id, labels=hal_pred, target_label=2)
-            candidate_words_lbl_0 = words_with_label(tokenizer, input_ids=response_id, labels=hal_pred, target_label=0)
+            hal_probs = selection_head_24.predict_proba(hl_24_embd)
+            hal_pred = (hal_probs >= 0.75).int()
+            candidate_words_lbl_1 = words_with_label(tokenizer, input_ids=response_id, labels=hal_pred, target_label=1)
+            # candidate_words_lbl_2 = words_with_label(tokenizer, input_ids=response_id, labels=hal_pred, target_label=2)
+            # candidate_words_lbl_0 = words_with_label(tokenizer, input_ids=response_id, labels=hal_pred, target_label=0)
             
-            candidate_words_2_hl_24_embd = hl_24_embd[hal_pred == 2]
-            candidate_words_0_hl_24_embd = hl_24_embd[hal_pred == 0]
-
-
+            # candidate_words_2_hl_24_embd = hl_24_embd[hal_pred == 2]
+            # candidate_words_0_hl_24_embd = hl_24_embd[hal_pred == 0]
+            candidate_words_1_hl_24_embd = hl_24_embd[hal_pred == 1]
+            
+            
             res = []
-            if candidate_words_2_hl_24_embd.shape[0] != 0:
-                assert len(candidate_words_lbl_2) == candidate_words_2_hl_24_embd.shape[0], "mismatch in non-halu words and embeddings"
+            if candidate_words_1_hl_24_embd.shape[0] != 0:
+                assert len(candidate_words_lbl_1) == candidate_words_1_hl_24_embd.shape[0], "mismatch in non-halu words and embeddings"
                 with torch.no_grad():
-                    evidence_head_logits, _ = single_head_24(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_2_hl_24_embd)
+                    evidence_head_logits, _ = single_head_24(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_1_hl_24_embd)
                     evidence_head_probs = torch.sigmoid(evidence_head_logits)
                     if detection_model_type == "attn":
-                        detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_2_hl_24_embd, evidence_logits=evidence_head_logits)
+                        detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_1_hl_24_embd, evidence_logits=evidence_head_logits)
                     elif detection_model_type == "mlp":
-                        detection_head_probs = detection_head_probs.predict_proba(text_tokens=candidate_words_2_hl_24_embd)
+                        detection_head_probs = detection_head_24.predict_proba(x=candidate_words_1_hl_24_embd)
 
-                    for word, evidence, label_prob in zip(candidate_words_lbl_2, evidence_head_probs, detection_head_probs):
+                    for word, evidence, label_prob in zip(candidate_words_lbl_1, evidence_head_probs, detection_head_probs):
                         res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": label_prob.cpu().item()})
 
-            if candidate_words_0_hl_24_embd.shape[0] != 0:
-                assert len(candidate_words_lbl_0) == candidate_words_0_hl_24_embd.shape[0], "mismatch in halu words and embeddings"
-                with torch.no_grad():
-                    evidence_head_logits, _ = single_head_24(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_0_hl_24_embd)
-                    evidence_head_probs = torch.sigmoid(evidence_head_logits)
-                    if detection_model_type == "attn":
-                        detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_0_hl_24_embd, evidence_logits=evidence_head_logits)
-                    elif detection_model_type == "mlp":
-                        detection_head_probs = detection_head_24.predict_proba(text_tokens=candidate_words_0_hl_24_embd)
+            # res = []
+            # if candidate_words_2_hl_24_embd.shape[0] != 0:
+            #     assert len(candidate_words_lbl_2) == candidate_words_2_hl_24_embd.shape[0], "mismatch in non-halu words and embeddings"
+            #     with torch.no_grad():
+            #         evidence_head_logits, _ = single_head_24(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_2_hl_24_embd)
+            #         evidence_head_probs = torch.sigmoid(evidence_head_logits)
+            #         if detection_model_type == "attn":
+            #             detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_2_hl_24_embd, evidence_logits=evidence_head_logits)
+            #         elif detection_model_type == "mlp":
+            #             detection_head_probs = detection_head_24.predict_proba(text_tokens=candidate_words_2_hl_24_embd)
+
+            #         for word, evidence, label_prob in zip(candidate_words_lbl_2, evidence_head_probs, detection_head_probs):
+            #             res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": label_prob.cpu().item()})
+
+            # if candidate_words_0_hl_24_embd.shape[0] != 0:
+            #     assert len(candidate_words_lbl_0) == candidate_words_0_hl_24_embd.shape[0], "mismatch in halu words and embeddings"
+            #     with torch.no_grad():
+            #         evidence_head_logits, _ = single_head_24(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_0_hl_24_embd)
+            #         evidence_head_probs = torch.sigmoid(evidence_head_logits)
+            #         if detection_model_type == "attn":
+            #             detection_head_probs = detection_head_24.predict_proba(img_tokens=image_tokens_hl_24_embd, text_tokens=candidate_words_0_hl_24_embd, evidence_logits=evidence_head_logits)
+            #         elif detection_model_type == "mlp":
+            #             detection_head_probs = detection_head_24.predict_proba(text_tokens=candidate_words_0_hl_24_embd)
                         
-                    for word, evidence, label_prob in zip(candidate_words_lbl_0, evidence_head_probs, detection_head_probs):
-                        res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": label_prob.cpu().item()})
+            #         for word, evidence, label_prob in zip(candidate_words_lbl_0, evidence_head_probs, detection_head_probs):
+            #             res.append({"word": word, "evidence": evidence.cpu().numpy(), "label": label_prob.cpu().item()})
 
             batch_res.append(res)
 
@@ -327,7 +344,7 @@ def eval_batch_model(args):
     total_df = pd.concat(all_dfs)
     arc = "mlp"
     date = "06_11_2025"
-    train_type= "2_stage"
+    train_type= "combined_stage"
     if dataset_name == "chair":
         total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/chair/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
@@ -340,6 +357,8 @@ def eval_batch_model(args):
     elif dataset_name == "amber":
         total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
+    elif dataset_name == "holoc":
+        total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/holoc/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
 
 if __name__ == "__main__":

@@ -399,7 +399,7 @@ def get_dataset(dataset_name: str):
 
 
         # total_df = pd.concat([instruct, gqa_small, visual_genome_small])
-        total_df = pd.concat([caption, coco_data, gqa_large, visual_genome_large])
+        total_df = pd.concat([caption, coco_data, gqa_large, visual_genome_large, instruct, gqa_small, visual_genome_small])
         
         total_df = total_df.sample(frac=1)
         return total_df.to_dict("records")

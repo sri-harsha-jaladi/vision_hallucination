@@ -25,7 +25,7 @@ from llava.eval.custom_processor import LlaVaProcessor, collate_fn_builder, _ini
 from llava.conversation import SeparatorStyle, conv_templates
 from llava.mm_utils import KeywordsStoppingCriteria
 
-from llava.req_heads.halu_detection import SingleHeadDetectionClassifier, HaluDetectionHead24
+from llava.req_heads.halu_detection import SingleHeadDetectionClassifier, HaluDetectionHead24, EvidenceConditionedHallucinationDetector
 from llava.req_heads.evidence_head import SingleHeadQueryAwareScorer
 
 from PIL import Image
@@ -125,8 +125,16 @@ def generate_llava(batch, tokenizer, model, processor, mode = "train", max_lengt
         target_hl_30_embds = [(h[m != 0]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], ans_only_token_level_labels)]
         target_hl_24_embds = [(h[m != 0]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], ans_only_token_level_labels)]
         target_labels = [(h[m != 0]).detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_token_level_labels, ans_only_token_level_labels)]
-        response_ids = [h[m != 0] for h, m in zip(expanded_input_ids, ans_only_token_level_labels)]
+        response_ids = [h[m != 0].detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_input_ids, ans_only_token_level_labels)]
 
+        
+        # target_hl_30_embds = [(h[m.bool()]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], expanded_ans_masks)]
+        # target_hl_24_embds = [(h[m.bool()]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], expanded_ans_masks)]
+        # target_labels = [(h[m.bool()]).detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_token_level_labels, expanded_ans_masks)]
+        # response_ids = [h[m.bool()].detach().clone().long().cuda().requires_grad_(False) for h, m in zip(expanded_input_ids, expanded_ans_masks)]
+
+        
+        
         image_tokens_h1_30_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[30], expanded_input_ids)]
         image_tokens_h1_24_embds = [ (h[m == -200]).detach().clone().float().cuda().requires_grad_(False) for h, m in zip(hidden_layers[24], expanded_input_ids)]
         
@@ -183,7 +191,7 @@ def train_batch_model(args):
     model.config.tokenizer_padding_side = tokenizer.padding_side = "left"
     processor = LlaVaProcessor(tokenizer, image_processor, model.config)
     
-    # evidence head loading
+    #evidence head loading
     # evidence_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/evidence/single_head_strict_train_24l_01_11_2024_d_4096.bin", map_location='cuda')
     # evidence_head_24 = SingleHeadQueryAwareScorer(d = 4096, d_k = 512, mlp_hidden = 512).cuda()
     # evidence_head_24.load_state_dict(evidence_head_24_weights)
@@ -199,9 +207,11 @@ def train_batch_model(args):
     # detection_head_24 = SingleHeadDetectionClassifier(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
     # detection_head_24.load_state_dict(detection_head_24_weights)
     
-    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/short_mlp_06_11_2024.bin", map_location='cuda')
+    # detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/short_mlp_06_11_2024.bin", map_location='cuda')
     detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
-    detection_head_24.load_state_dict(detection_head_24_weights)
+    # detection_head_24.load_state_dict(detection_head_24_weights)
+    
+    # detection_head_24 = EvidenceConditionedHallucinationDetector(d= 4096).cuda()
     
     
     
@@ -241,6 +251,7 @@ def train_batch_model(args):
             #     ev_logits, _= evidence_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd)
             
             labels_mapped = (target_label == 1).float()
+            # logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd, labels=labels_mapped, evidence_logits=ev_logits)
             # logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd, labels=labels_mapped)
             logits, loss = detection_head_24(x=hl_24_embd, labels=labels_mapped)
             losses_24.append(loss)
@@ -266,9 +277,9 @@ def train_batch_model(args):
         })
         step += 1
         if step in [500,1000,1500,2000, 2250, 2500]:
-            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/large_mlp_{step}_06_11_2024.bin")
+            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/combined_mlp_{step}_06_11_2024.bin")
 
-    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/large_mlp_06_11_2024.bin")
+    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/combined_mlp_06_11_2024.bin")
 
     torch.cuda.empty_cache()
     

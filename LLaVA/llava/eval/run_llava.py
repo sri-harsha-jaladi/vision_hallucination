@@ -259,13 +259,13 @@ def eval_batch_model(args):
     selection_head_24.load_state_dict(selection_head_24_weights)
     
     # detection head loading
-    detection_model_type = "mlp"
+    detection_model_type = "attn"
     detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/combined_mlp_1000_06_11_2024.bin", map_location='cuda')
     detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
     detection_head_24.load_state_dict(detection_head_24_weights)
     
 
-    dataset_name="holoc"
+    dataset_name="mme"
     collate_fn = collate_fn_builder(processor, None)
     dataloader = _initialize_dataloader(dataset_name=dataset_name, collate_fn=collate_fn, num_workers=32, batch_size=32, shuffle=False)
 
@@ -275,7 +275,7 @@ def eval_batch_model(args):
     detection_head_24.eval()
 
     all_dfs = []
-    target_columns = ['question', 'answer', 'question_id', 'image_id', 'image_path',  "gt_answer", "data_type"]
+    target_columns = ['question', 'answer', 'question_id', 'image_id', 'image_path',  "gt_answer", "data_type","candidates", "hallucination_candidates"]
     for batch in tqdm(dataloader, desc="storing embds"):
         target_hl_24_embds, response_ids, image_tokens_h1_24_embds = llava_forward_halu_detect(batch, tokenizer, model, processor)
 
@@ -342,8 +342,8 @@ def eval_batch_model(args):
         all_dfs.append(df)
 
     total_df = pd.concat(all_dfs)
-    arc = "mlp"
-    date = "06_11_2025"
+    arc = "attn"
+    date = "09_11_2025"
     train_type= "combined_stage"
     if dataset_name == "chair":
         total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/chair/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
@@ -357,8 +357,8 @@ def eval_batch_model(args):
     elif dataset_name == "amber":
         total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
-    elif dataset_name == "holoc":
-        total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/holoc/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
+    elif dataset_name == "ours":
+        total_df.to_pickle(f"/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/ours/{train_type}_label_with_evidence_and_{arc}_{date}.pkl")
 
 
 if __name__ == "__main__":

@@ -284,7 +284,10 @@ class LlaVaProcessor:
         conv.append_message(conv.roles[0], text)
         conv.append_message(conv.roles[1], None)
         text = conv.get_prompt()
-        text += answer if answer is not None else ""
+        try:
+            text += answer if answer is not None else ""
+        except Exception as e:
+            print(f"Error occurred while formatting text: {e}")
 
         return text
 
@@ -414,7 +417,7 @@ class LlaVaProcessor:
 def collate_fn_builder(processor=None, tokenizer=None , mode = "gen"):
     
     def collate_fn(batch):
-        bkeys = ["question", "answer", "question_id", "image", "image_id", "image_path", "gt_answer", "data_type"]
+        bkeys = ["question", "answer", "question_id", "image", "image_id", "image_path", "gt_answer", "data_type", "candidates", "hallucination_candidates"]
         processed_batch = {bkey: [example[bkey] for example in batch] for bkey in bkeys if bkey in batch[0]}
 
         
@@ -473,6 +476,8 @@ class VQADataset(Dataset):
             "question_id": content["question_id"],
             "gt_answer": content.get("gt_answer", None),
             "data_type": content.get("data_type", "no_datatype"),
+            "candidates": content.get("candidates", []),
+            "hallucination_candidates": content.get("hallucination_candidates", []),
         }
         
         return data
@@ -501,8 +506,7 @@ def get_dataset(dataset_name: str):
     elif dataset_name == "amber":
         df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/amber/amber_llava_base_des.csv")
         return df.to_dict("records")
-    elif dataset_name == "holoc":
-        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/holoc/holoc_test_data.csv")
-        return df.to_dict("records")
     
-
+    elif dataset_name == "ours":
+        df = pd.read_csv("/Data2/Arun-UAV/NLP/vision_halu/total_flow_testing_results/ours/own_gemini_labled_5k.csv")
+        return df.to_dict("records")

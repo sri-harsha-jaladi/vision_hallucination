@@ -204,11 +204,11 @@ def train_batch_model(args):
     
     
     # detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/short_train_attn_detection_head_24hl_05_11_2024.bin", map_location='cuda')
-    detection_head_24 = SingleHeadDetectionClassifier(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
+    # detection_head_24 = SingleHeadDetectionClassifier(d = 4096, d_k = 1024, mlp_hidden = 1024).cuda()
     # detection_head_24.load_state_dict(detection_head_24_weights)
     
     # detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/short_mlp_06_11_2024.bin", map_location='cuda')
-    # detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
+    detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
     # detection_head_24.load_state_dict(detection_head_24_weights)
     
     # detection_head_24 = EvidenceConditionedHallucinationDetector(d= 4096).cuda()
@@ -218,7 +218,7 @@ def train_batch_model(args):
     optimizer_detection_head_24 = AdamW(detection_head_24.parameters(), lr=1e-3, weight_decay=1e-4, betas=(0.9, 0.999))
     
     steps_per_epoch = len(dataloader)
-    num_epochs = 1                             # <- set this
+    num_epochs = 2                             # <- set this
     total_steps = steps_per_epoch * num_epochs
     warmup_steps = int(0.1 * total_steps)     # 10% warmup
     min_lr_ratio = 0.05
@@ -237,49 +237,51 @@ def train_batch_model(args):
     sched_optimizer_detection_head_24 = LambdaLR(optimizer_detection_head_24, lr_lambda)
 
     step = 0
-    detection_head_24.train()
-    for batch in tqdm(dataloader, desc=f"step: training detection head"):
-        target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds = generate_llava(batch, tokenizer, model, processor)
-        
-        optimizer_detection_head_24.zero_grad(set_to_none=True)
-        
-        losses_24 = []
-        for hl_30_embd, hl_24_embd, target_label, img_token_h1_30_embd, img_token_h1_24_embd in \
-                zip(target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds):
+ 
+    for epoch in range(num_epochs):
+        detection_head_24.train()
+        for batch in tqdm(dataloader, desc=f"step: training detection head"):
+            target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds = generate_llava(batch, tokenizer, model, processor)
             
-            # with torch.no_grad():
-            #     ev_logits, _= evidence_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd)
+            optimizer_detection_head_24.zero_grad(set_to_none=True)
             
-            labels_mapped = (target_label == 1).float()
-            # logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd, labels=labels_mapped, evidence_logits=ev_logits)
-            logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd, labels=labels_mapped)
-            # logits, loss = detection_head_24(x=hl_24_embd, labels=labels_mapped)
-            losses_24.append(loss)
+            losses_24 = []
+            for hl_30_embd, hl_24_embd, target_label, img_token_h1_30_embd, img_token_h1_24_embd in \
+                    zip(target_hl_30_embds, target_hl_24_embds, target_labels, image_tokens_h1_30_embds, image_tokens_h1_24_embds):
+                
+                # with torch.no_grad():
+                #     ev_logits, _= evidence_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd)
+                
+                labels_mapped = (target_label == 1).float()
+                # logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd, labels=labels_mapped, evidence_logits=ev_logits)
+                # logits, loss = detection_head_24(img_tokens=img_token_h1_24_embd, text_tokens=hl_24_embd, labels=labels_mapped)
+                logits, loss = detection_head_24(x=hl_24_embd, labels=labels_mapped)
+                losses_24.append(loss)
+                
+            batch_loss_24 = torch.stack(losses_24).mean()
             
-        batch_loss_24 = torch.stack(losses_24).mean()
-        
-        if torch.isnan(batch_loss_24):
-            print(f"NaN loss at step {step}, skipping batch")
-            continue
-        
-        batch_loss_24.backward()
+            if torch.isnan(batch_loss_24):
+                print(f"NaN loss at step {step}, skipping batch")
+                continue
+            
+            batch_loss_24.backward()
 
-        torch.nn.utils.clip_grad_norm_(list(detection_head_24.parameters()), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(list(detection_head_24.parameters()), max_norm=1.0)
 
-        optimizer_detection_head_24.step()
-        sched_optimizer_detection_head_24.step()
+            optimizer_detection_head_24.step()
+            sched_optimizer_detection_head_24.step()
 
-        print(f"24 Avg loss: {batch_loss_24.item():.4f}")
-        wandb.log({
-            "step": step,
-            "avg_loss_24": batch_loss_24.item(),
-            "lr_24": optimizer_detection_head_24.param_groups[0]["lr"]
-        })
-        step += 1
-        if step in [500,1000,1500,2000, 2250, 2500]:
-            torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/combined_attn_{step}_07_11_2024.bin")
+            print(f"24 Avg loss: {batch_loss_24.item():.4f}")
+            wandb.log({
+                "step": step,
+                "avg_loss_24": batch_loss_24.item(),
+                "lr_24": optimizer_detection_head_24.param_groups[0]["lr"]
+            })
+            step += 1
+            if step in [500,1000,1500,2000, 2250, 2500, 3000, 3500, 4000]:
+                torch.save(detection_head_24.state_dict(), f"/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/combined_mlp_{step}_07_11_2024.bin")
 
-    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/combined_attn_07_11_2024.bin")
+    torch.save(detection_head_24.state_dict(), "/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/detection/combined_mlp_07_11_2024.bin")
 
     torch.cuda.empty_cache()
     

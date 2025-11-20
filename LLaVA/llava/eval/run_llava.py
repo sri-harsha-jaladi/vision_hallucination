@@ -259,8 +259,8 @@ def eval_batch_model(args):
     selection_head_24.load_state_dict(selection_head_24_weights)
     
     # detection head loading
-    detection_model_type = "attn"
-    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/combined_mlp_1000_06_11_2024.bin", map_location='cuda')
+    detection_model_type = "mlp"
+    detection_head_24_weights = torch.load("/Data2/Arun-UAV/NLP/vision_halu/head_checkpoints/backup_detection/combined_mlp_1500_07_11_2024.bin", map_location='cuda')
     detection_head_24 = HaluDetectionHead24(input_dim= 4096, hidden_dim1 = 2048, hidden_dim2 = 1024).cuda()
     detection_head_24.load_state_dict(detection_head_24_weights)
     
@@ -342,7 +342,7 @@ def eval_batch_model(args):
         all_dfs.append(df)
 
     total_df = pd.concat(all_dfs)
-    arc = "attn"
+    arc = "mlp"
     date = "09_11_2025"
     train_type= "combined_stage"
     if dataset_name == "chair":

@@ -12,3 +12,10 @@ evidence_head_train_datasets/
 large_image_datasets/
 hal_detection_head_train_datasets/
 evidence_head_test_datasets/
+Deco/
+helper_nbs/
+halu_detection_mitigation/
+our_proposed_dataset/
+our_proposed_dataset_2/
+total_flow_testing_results/
+d_j_fix_sup_mat/
